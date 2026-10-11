@@ -945,25 +945,33 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     const cs = container.resolve('cacheService');
     const cached = (cs.getMatchesReadOnly ? cs.getMatchesReadOnly() : cs.getMatches());
     if (Array.isArray(cached) && cached.length > 0) {
-      const present = new Set(cached.map(m => m && m.category).filter(Boolean));
-      const replaysAvailable = new Set(
-        cached.filter(m => isReplayMatch(m)).map(m => m.category).filter(Boolean)
-      );
+      const present = new Set();
+      for (let i = 0; i < cached.length; i++) {
+        const m = cached[i];
+        if (m && m.category) present.add(m.category);
+      }
 
       // Always-keep catalogs: not tied to a single sport.
       const ALWAYS_KEEP = new Set([
         'nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming',
         'nuvio_sports_other', 'nuvio_sports_networks'
       ]);
-      // Pre-extract lowercase network channel titles once to avoid O(C * N) scans per catalog
-      const networkTitles = [];
-      for (let i = 0; i < cached.length; i++) {
-        const m = cached[i];
-        if (m && m.category === 'networks' && m.title) {
-          networkTitles.push(String(m.title).toLowerCase());
+
+      // Lazily extract lowercase network titles if needed by any catalog
+      let networkHaystack = null;
+      const getNetworkHaystack = () => {
+        if (networkHaystack === null) {
+          const parts = [];
+          for (let i = 0; i < cached.length; i++) {
+            const m = cached[i];
+            if (m && m.category === 'networks' && m.title) {
+              parts.push(String(m.title).toLowerCase());
+            }
+          }
+          networkHaystack = parts.join(' ');
         }
-      }
-      const hasNetworks = networkTitles.length > 0;
+        return networkHaystack;
+      };
 
       newManifest.catalogs = newManifest.catalogs.filter((c) => {
         if (ALWAYS_KEEP.has(c.id)) return true;
@@ -980,12 +988,8 @@ app.get('/:config?/manifest.json', (req, res, next) => {
         const cat = c.id.replace('nuvio_sports_', '');
         // Keep 24/7 network-carried sports even when no fixture is scheduled.
         if (present.has(cat)) return true;
-        if (hasNetworks) {
-          for (let i = 0; i < networkTitles.length; i++) {
-            if (networkTitles[i].includes(cat)) return true;
-          }
-        }
-        return false;
+        const haystack = getNetworkHaystack();
+        return haystack.includes(cat);
       });
     }
   } catch (_) {

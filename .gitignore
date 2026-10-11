@@ -32,3 +32,12 @@ jest.log
 # `git reset --hard HEAD`, so a tracked runtime cache is wiped on every deploy.
 /data/
 /caches/
+
+# Benchmark outputs
+benchmarks/results/*.md
+benchmarks/results/*.json
+!benchmarks/results/forensic-audit-report.md
+!benchmarks/results/regression-analysis.md
+!benchmarks/results/change-summary.md
+!benchmarks/results/raw-forensic-audit.json
+

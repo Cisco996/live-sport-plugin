@@ -139,8 +139,9 @@ async function startServer(options = {}) {
     NODE_ENV: 'test'
   };
 
-  const serverProc = child_process.spawn(process.execPath, [path.join(ROOT_DIR, 'src', 'index.js')], {
-    cwd: ROOT_DIR,
+  const rootDir = options.rootDir || ROOT_DIR;
+  const serverProc = child_process.spawn(process.execPath, [path.join(rootDir, 'src', 'index.js')], {
+    cwd: rootDir,
     env: spawnEnv,
     stdio: ['ignore', 'pipe', 'pipe']
   });

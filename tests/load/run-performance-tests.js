@@ -21,6 +21,10 @@ const {
   runSingleFlightStress,
   runManifestProxyScenario,
   runImageProxyScenario,
+  runTenKUserSimulation,
+  runCatalogSortFlood,
+  runFindMatchFlood,
+  runMemoryRegressionGuard,
   fetchTelemetry,
   fetchMatches
 } = require('./scenarios');
@@ -43,6 +47,8 @@ function parseArgs() {
       options.resolverPort = parseInt(arg.split('=')[1], 10);
     } else if (arg.startsWith('--concurrency-multiplier=')) {
       options.concurrencyMultiplier = parseFloat(arg.split('=')[1]);
+    } else if (arg.startsWith('--root-dir=')) {
+      options.rootDir = arg.split('=')[1];
     } else if (arg === '--fresh' || arg === '--no-reuse') {
       options.reuseExisting = false;
     }
@@ -149,6 +155,7 @@ async function main() {
       port: options.port,
       resolverPort: options.resolverPort,
       reuseExisting: options.reuseExisting,
+      rootDir: options.rootDir,
       timeoutMs: 180000
     });
 
@@ -229,7 +236,43 @@ async function main() {
     scenarioResults.push(s6);
     printScenarioResult(s6);
 
-    // 10. Fetch Final Telemetry
+    // 10. Scenario 7: 10k User Simulation (Duration Load)
+    console.log('\n👉 Executing Scenario 7: 10k User Simulation (Duration Load)...');
+    const s7 = await runTenKUserSimulation(serverInstance.baseUrl, {
+      concurrency: Math.max(10, Math.round(60 * options.concurrencyMultiplier)),
+      durationSec: 10
+    });
+    scenarioResults.push(s7);
+    printScenarioResult(s7);
+
+    // 11. Scenario 8: Catalog Sort Under Heavy Match Load
+    console.log('\n👉 Executing Scenario 8: Catalog Sort Under Heavy Match Load...');
+    const s8 = await runCatalogSortFlood(serverInstance.baseUrl, {
+      concurrency: Math.max(5, Math.round(40 * options.concurrencyMultiplier)),
+      totalRequests: Math.max(20, Math.round(150 * options.concurrencyMultiplier))
+    });
+    scenarioResults.push(s8);
+    printScenarioResult(s8);
+
+    // 12. Scenario 9: findMatch O(1) Lookup Flood
+    console.log('\n👉 Executing Scenario 9: findMatch O(1) Lookup Flood...');
+    const s9 = await runFindMatchFlood(serverInstance.baseUrl, {
+      matchId: s3MatchId ? `nuvio_sport_${s3MatchId}` : null,
+      concurrency: Math.max(10, Math.round(50 * options.concurrencyMultiplier)),
+      totalRequests: Math.max(20, Math.round(200 * options.concurrencyMultiplier))
+    });
+    scenarioResults.push(s9);
+    printScenarioResult(s9);
+
+    // 13. Scenario 10: Memory Regression Guard
+    console.log('\n👉 Executing Scenario 10: Memory Regression Guard...');
+    const s10 = await runMemoryRegressionGuard(serverInstance.baseUrl, {
+      totalRequests: Math.max(20, Math.round(100 * options.concurrencyMultiplier))
+    });
+    scenarioResults.push(s10);
+    printScenarioResult(s10);
+
+    // 14. Fetch Final Telemetry
     const finalTelemetry = await fetchTelemetry(serverInstance.baseUrl);
 
     const totalElapsedSec = (Date.now() - tSuiteStart) / 1000;
@@ -238,13 +281,13 @@ async function main() {
     const allPassed = scenarioResults.every((r) => r.passed);
 
     if (allPassed) {
-      console.log('🎉 ALL 6 PERFORMANCE & LOAD SCENARIOS PASSED WITH ZERO ERRORS!\n');
+      console.log('🎉 ALL 10 PERFORMANCE & LOAD SCENARIOS PASSED WITH ZERO ERRORS!\n');
     } else {
       const failedCount = scenarioResults.filter((r) => !r.passed).length;
-      console.error(`💥 ${failedCount} OF 6 SCENARIOS FAILED AUDIT CRITERIA.\n`);
+      console.error(`💥 ${failedCount} OF 10 SCENARIOS FAILED AUDIT CRITERIA.\n`);
     }
 
-    return allPassed;
+    return { allPassed, scenarioResults, finalTelemetry, totalElapsedSec };
   } finally {
     console.log('🧹 [Teardown] Cleaning up servers & child processes...');
     if (mockUpstream) {
@@ -259,8 +302,8 @@ async function main() {
 
 if (require.main === module) {
   main()
-    .then((success) => {
-      process.exit(success ? 0 : 1);
+    .then((result) => {
+      process.exit((result && result.allPassed !== false) ? 0 : 1);
     })
     .catch((err) => {
       console.error('💥 Fatal error in performance test suite:', err);

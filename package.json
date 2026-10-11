@@ -15,7 +15,14 @@
     "check-sources": "node scripts/check-sources.js",
     "prewarm:cron": "node scripts/prewarm-cron.js",
     "prewarm:cron:dry": "node scripts/prewarm-cron.js --dry-run",
-    "sync:matches": "node scripts/sync-matches.js"
+    "sync:matches": "node scripts/sync-matches.js",
+    "bench": "node scripts/run-branch-benchmark.js",
+    "bench:synthetic": "node scripts/run-branch-benchmark.js --synthetic-only",
+    "bench:live": "node scripts/run-branch-benchmark.js --no-switch",
+    "bench:heap": "node --expose-gc tests/load/heap-benchmark.js",
+    "bench:compare": "node scripts/run-branch-benchmark.js --multiplier 1.0",
+    "bench:compare:full": "node scripts/run-branch-benchmark.js --multiplier 1.0 --scale 50000",
+    "bench:report": "node scripts/generate-bench-report.js"
   },
   "dependencies": {
     "acorn": "^8.18.0",
@@ -30,7 +37,6 @@
     "happy-dom": "^20.11.1",
     "http-proxy-middleware": "^4.2.0",
     "impit": "^0.14.3",
-    "jest": "^30.4.2",
     "js-yaml": "^5.2.2",
     "jsdom": "^29.1.1",
     "lz-string": "^1.5.0",
@@ -62,11 +68,15 @@
       "/node_modules/",
       "/test-scripts/",
       "/scratch/",
-      "/nuvio-proxy-2/"
+      "/nuvio-proxy-2/",
+      "/tests/load/"
     ]
   },
   "overrides": {
     "glob": "^11.0.0",
     "inflight": "^1.0.6"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   }
 }
