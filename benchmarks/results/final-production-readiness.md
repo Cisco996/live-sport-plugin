@@ -47,14 +47,18 @@ The candidate branch was rigorously investigated across six independent technica
 ## 4. Gate 1: Code Under Review & SHA Discrepancy Resolution
 
 ### Findings
-Previous artifacts referenced two candidate commit SHAs:
-1. `8d36da4cfb06e8b4e76865fc21e4aeb657738f61`: The original candidate branch commit (`perf(extractor): add early-exit heuristic in brute-force XOR candidate loop`).
-2. `1bec4bb213339498014b6d6b6b63a78b992e894a`: The commit produced by applying the audit fixes (resolving the eager manifest filtering regression in `src/index.js`, correcting the heap report label matcher in `scripts/generate-bench-report.js`, and adding the benchmark artifacts).
+Previous artifacts referenced differing candidate and baseline commit SHAs:
+1. **Remote Candidate Commit:** `8d36da481eb917c7714b1c9bc8ea8a9ed287b44b` (`origin/perf/improve-time-complexity`).
+   - *Provenance Note:* Earlier draft reports (`forensic-audit-report.md` and `raw-forensic-audit.json`) transcribed the 7-character short SHA `8d36da4` as `8d36da4cfb06e8b4e76865fc21e4aeb657738f61` and `main`'s `700fad8` as `700fad8e7d4ee7111ebfe5be0cbf6dc4b5f9393a`. Verification against `git cat-file` confirms that these 40-character strings were erroneous expansions; the genuine git object IDs are `8d36da481eb917c7714b1c9bc8ea8a9ed287b44b` and `700fad8343a057797eb37b30709b7be5f6dae599`.
+2. **Local Candidate Audit Chain:**
+   - `1bec4bb213339498014b6d6b6b63a78b992e894a`: Applied production audit fixes (lazy manifest haystack in `src/index.js`, harness label matching in `scripts/generate-bench-report.js`, and test formatting).
+   - `2a559c34b43cfb4dd26e27c445b5a5314a662692`: Added formal JSDoc contract in `src/services/CacheService.js` and initial readiness deliverable.
+   - `6e35558c810ea03cc92474e249b086e9f799ea47` (Current HEAD): Audit documentation tracking.
 
 ### Provenance Resolution
-- `8d36da4` is the parent commit.
-- `1bec4bb` is the current HEAD of `perf/improve-time-complexity`.
-- `1bec4bb` is the authoritative code version under review and evaluated for this final production gate.
+- The baseline code evaluated in all benchmarks is `main` at `700fad8343a057797eb37b30709b7be5f6dae599`.
+- The candidate code evaluated in all benchmarks and tests is `perf/improve-time-complexity` at `1bec4bb` / `HEAD`, where the only production change beyond `8d36da4` is the lazy manifest optimization in `src/index.js` and documentation in `CacheService.js`.
+- All reported test runs (602/602 tests) and load benchmarks ran against these exact commits.
 
 ---
 
@@ -150,11 +154,32 @@ We evaluated 10 test cases against both baseline and candidate:
    - Iterates array in a read-only `for` loop to build a category Set. Zero mutations.
 
 ### Logo Enrichment Mutation Analysis
-In `src/catalog.js:673`, `mapMatchToMetaPreview` executes:
-`match.team1 = { ...(match.team1 || {}), name: team1Name, logo: logo1 || null };`
-- This mutation attaches resolved logo URLs directly to the cached match object.
-- **Safety Assessment:** This mutation is idempotent and serves as an intentional, beneficial in-memory logo cache for subsequent catalog requests. It does not alter `match.id`, `match.sources`, or `match.category`.
-- **Isolation Guarantee:** Per-user stream resolution in `findMatch(matchId)` calls `this._cloneMatch(found)` in $O(1)$ time, ensuring downstream per-request modifications (custom stream URLs, token headers) **never** contaminate the shared cache.
+In `src/catalog.js:673` and `678`, `mapMatchToMetaPreview` executes:
+```javascript
+match.team1 = { ...(match.team1 || {}), name: team1Name, logo: logo1 || null };
+match.team2 = { ...(match.team2 || {}), name: team2Name, logo: logo2 || null };
+```
+- Across all 1,590 lines of `src/catalog.js`, lines 673 & 678 are the **only** property assignments targeting match objects.
+- Although `.filter()` returns a new array, its elements are direct references to `cacheService.cachedMatches`. Calling `mapMatchToMetaPreview` on page slices directly attaches the resolved team logos in-place onto the cached match objects in memory.
+
+### Two-Worker Architecture Safety Audit
+1. **Multi-Process V8 Heap Isolation:**
+   - In Node.js PM2 / cluster execution mode, Worker 0 and Worker 1 run in independent operating system processes.
+   - Each worker has its own completely private V8 heap and memory space. JavaScript memory pointers and object graphs are **never** shared across workers.
+   - An in-memory property assignment on `match.team1` in Worker 0 cannot mutate, corrupt, or affect the memory of Worker 1.
+2. **Intra-Worker Event Loop Safety (Idempotence & Monotonicity):**
+   - Node.js executes JavaScript on a single-threaded event loop per worker.
+   - `mapMatchToMetaPreview` executes synchronously. When resolving team logos, it first checks `const existingLogo = match.team1 && match.team1.logo`. If already set, `logo1` retains `existingLogo`.
+   - The mutation is strictly idempotent, additive, and monotonic: once attached, repeated catalog requests within the same worker simply reuse the already attached logo without performing redundant `teamLogoService` lookups.
+3. **Cross-Worker Synchronization & Disk Cache Boundaries:**
+   - Worker cache updates synchronize strictly through the filesystem (`matches_cache.json`).
+   - Catalog read paths (`handleCatalog`, `handleReplayCatalog`, `/manifest.json`) **never** call `_saveDiskCache()`.
+   - Disk writes only occur when the background aggregator syncs (`setMatches()`). When Worker 0 writes fresh matches to disk, Worker 1's `_ensureLoaded()` detects `stats.mtimeMs > this.lastDiskMtime` (throttled to at most once per second) and safely reloads via `this._clone(parsed.matches)`.
+   - If Worker 0 enriches a match with a logo, Worker 1 independently enriches it when servicing its own catalog requests via the shared file/SQLite-backed `TeamLogoService`. Both workers deterministically converge to identical states.
+4. **Per-Request Stream Isolation Guarantee:**
+   - When a client requests a video stream (`/stream/tv/:id.json`), `cacheService.findMatch(matchId)` calls `this._cloneMatch(found)` in $O(1)$ time.
+   - Downstream stream resolution mutations (token minting, custom stream URLs, headers) operate exclusively on the clone and **never** leak into or mutate the shared cache.
+   - Critical match attributes (`match.id`, `match.sources`, `match.category`, and `match.date`) are never mutated anywhere.
 
 ### Added Documentation
 JSDoc formal contract added to `src/services/CacheService.js` defining read-only invariants and usage boundaries.
