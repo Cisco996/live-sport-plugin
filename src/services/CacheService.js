@@ -170,6 +170,19 @@ class CacheService {
     return this._clone(this.cachedMatches);
   }
 
+  /**
+   * Returns a direct reference to the internal cached matches array in O(1) time
+   * without deep-cloning all match entities.
+   *
+   * CONTRACT / INVARIANTS:
+   * - Callers MUST treat the returned array and its elements as strictly read-only.
+   * - Do not push, pop, splice, or sort this array directly.
+   * - Do not mutate match.id, match.sources, or match.category.
+   * - Downstream catalog meta projection may idempotently attach team logos.
+   * - For mutable per-request match processing, use findMatch() or getMatches().
+   *
+   * @returns {Array<Object>} The internal cached matches array.
+   */
   getMatchesReadOnly() {
     this._ensureLoaded();
     return this.cachedMatches || [];

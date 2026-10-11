@@ -40,4 +40,5 @@ benchmarks/results/*.json
 !benchmarks/results/regression-analysis.md
 !benchmarks/results/change-summary.md
 !benchmarks/results/raw-forensic-audit.json
+!benchmarks/results/final-production-readiness.md
 
