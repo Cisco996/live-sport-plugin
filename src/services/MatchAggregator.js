@@ -223,25 +223,27 @@ class MatchAggregator {
    *     Jaccard rule ("Sky Sports F1" + "Sky Sports Main Event" merged;
    *     "US Open Court 13" + "Court 7" merged)
    */
+  _normalizeCategory(c) {
+    if (!c) return c;
+    const lc = c.toLowerCase();
+    if (['nbl', 'nba', 'wnba', 'euroleague', 'ncaa_basketball'].includes(lc)) return 'basketball';
+    if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
+    if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
+    if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel'].includes(lc)) return 'football';
+    if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
+    if (['mlb', 'npb'].includes(lc)) return 'baseball';
+    if (['nhl', 'khl', 'ice hockey', 'ice_hockey', 'icehockey'].includes(lc)) return 'hockey';
+    if (['sports', 'sport', 'networks'].includes(lc)) return 'other';
+    return lc;
+  }
+
   _sameEventPre(p1, p2) {
     // 1. Category mismatch guard
     // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
     // while others use the parent sport name (basketball, american_football,
     // football, rugby). Normalise both to the parent before comparing so the
     // same fixture from two different providers isn't blocked by the guard.
-    const _normalizeCategory = (c) => {
-      if (!c) return c;
-      const lc = c.toLowerCase();
-      if (['nbl', 'nba', 'wnba', 'euroleague', 'ncaa_basketball'].includes(lc)) return 'basketball';
-      if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
-      if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
-      if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel'].includes(lc)) return 'football';
-      if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
-      if (['mlb', 'npb'].includes(lc)) return 'baseball';
-      if (['nhl', 'khl', 'ice hockey', 'ice_hockey', 'icehockey'].includes(lc)) return 'hockey';
-      if (['sports', 'sport', 'networks'].includes(lc)) return 'other';
-      return lc;
-    };
+    const _normalizeCategory = (c) => this._normalizeCategory(c);
     const c1 = _normalizeCategory(p1.category);
     const c2 = _normalizeCategory(p2.category);
     const isCollegeFootball = ((p1.category || '').toLowerCase() === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
@@ -329,6 +331,8 @@ class MatchAggregator {
     console.log('[MatchAggregator] Fetching from all providers...');
     const finalMatches = [];
     const finalPres = []; // precomputed identity for each accepted match
+    const idIndex = new Map(); // exact ID/alias -> index in finalMatches
+    const categoryBuckets = new Map(); // normalized sport category -> array of finalMatches indices
 
     // The merge scan is O(incoming x accepted). At production scale one
     // provider's rows used to land as a single ~200ms synchronous block on the
@@ -349,13 +353,74 @@ class MatchAggregator {
 
         const pre = this._precompute(match);
         let idx = -1;
-        for (let i = 0; i < finalMatches.length; i++) {
-          if (this._sameEventPre(finalPres[i], pre)) { idx = i; break; }
+
+        // 1. Fast O(1) Exact ID & Alias check
+        if (match.id && idIndex.has(match.id)) {
+          idx = idIndex.get(match.id);
+        } else if (Array.isArray(match.aliasIds)) {
+          for (const aid of match.aliasIds) {
+            if (aid && idIndex.has(aid)) {
+              idx = idIndex.get(aid);
+              break;
+            }
+          }
+        }
+
+        // 2. Bucketed candidate search if no exact ID match
+        if (idx === -1) {
+          const c2 = this._normalizeCategory(pre.category);
+          const rawCat2 = (pre.category || '').toLowerCase();
+          const isCollegeFootball2 = rawCat2 === 'college' || c2 === 'american_football' || c2 === 'football';
+
+          if (c2 === 'other' || !c2) {
+            // 'other' can cross-match with any category
+            for (let i = 0; i < finalMatches.length; i++) {
+              if (this._sameEventPre(finalPres[i], pre)) { idx = i; break; }
+            }
+          } else {
+            // Check only matching category bucket + 'other' bucket + optional college football cross-bucket
+            const checkedIndices = new Set();
+            const bucketsToCheck = [categoryBuckets.get(c2), categoryBuckets.get('other')];
+            if (isCollegeFootball2) {
+              bucketsToCheck.push(categoryBuckets.get('college'), categoryBuckets.get('american_football'), categoryBuckets.get('football'));
+            }
+
+            for (let bIdx = 0; bIdx < bucketsToCheck.length; bIdx++) {
+              const b = bucketsToCheck[bIdx];
+              if (!b) continue;
+              for (let j = 0; j < b.length; j++) {
+                const i = b[j];
+                if (checkedIndices.has(i)) continue;
+                checkedIndices.add(i);
+                if (this._sameEventPre(finalPres[i], pre)) {
+                  idx = i;
+                  break;
+                }
+              }
+              if (idx !== -1) break;
+            }
+          }
         }
 
         if (idx === -1) {
+          const newIdx = finalMatches.length;
           finalMatches.push(match);
           finalPres.push(pre);
+
+          if (match.id) idIndex.set(match.id, newIdx);
+          if (Array.isArray(match.aliasIds)) {
+            for (const aid of match.aliasIds) if (aid) idIndex.set(aid, newIdx);
+          }
+
+          const normCat = this._normalizeCategory(match.category) || 'other';
+          if (!categoryBuckets.has(normCat)) categoryBuckets.set(normCat, []);
+          categoryBuckets.get(normCat).push(newIdx);
+
+          const rawCat = (match.category || '').toLowerCase();
+          if (rawCat === 'college' && normCat !== 'college') {
+            if (!categoryBuckets.has('college')) categoryBuckets.set('college', []);
+            categoryBuckets.get('college').push(newIdx);
+          }
           continue;
         }
 
@@ -363,10 +428,14 @@ class MatchAggregator {
         if (!existing.aliasIds) existing.aliasIds = [];
         if (match.id && !existing.aliasIds.includes(match.id)) {
           existing.aliasIds.push(match.id);
+          idIndex.set(match.id, idx);
         }
         if (Array.isArray(match.aliasIds)) {
           for (const aid of match.aliasIds) {
-            if (!existing.aliasIds.includes(aid)) existing.aliasIds.push(aid);
+            if (aid && !existing.aliasIds.includes(aid)) {
+              existing.aliasIds.push(aid);
+              idIndex.set(aid, idx);
+            }
           }
         }
         if (match.sources && Array.isArray(match.sources)) {
@@ -397,6 +466,8 @@ class MatchAggregator {
         if (existing.category !== 'college' && match.category === 'college') {
           existing.category = 'college';
           finalPres[idx].category = 'college';
+          if (!categoryBuckets.has('college')) categoryBuckets.set('college', []);
+          categoryBuckets.get('college').push(idx);
         }
 
         // Reconcile kickoff date: if existing date is missing or 0, adopt incoming date.
@@ -457,6 +528,7 @@ class MatchAggregator {
     }
 
     const providersToQuery = this.providers.filter(p => {
+      if (!p) return false;
       const name = p.sourceName || p.name || '';
       if (REPLAY_PROVIDERS.has(name) && isReplayFresh) {
         return false;
