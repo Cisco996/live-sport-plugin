@@ -4,7 +4,7 @@
 **Date of Audit:** October 11, 2026  
 **Repository:** `Nuvio Live Sports Plugin`  
 **Baseline SHA:** `700fad8343a057797eb37b30709b7be5f6dae599` (`main`)  
-**Candidate SHA:** `1bec4bb213339498014b6d6b6b63a78b992e894a` (`perf/improve-time-complexity`)  
+**Candidate SHA:** `2a559c3c1356f990924036f01441865261327179` (`perf/improve-time-complexity`)  
 
 ---
 
