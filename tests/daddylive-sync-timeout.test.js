@@ -123,10 +123,11 @@ describe('ceiling is coupled to the circuit breaker, never above it', () => {
 });
 
 describe('call sites are wired correctly', () => {
-  test('exactly 3 sync fetches use the helper', () => {
+  test('exactly 2 sync fetches use the helper', () => {
     // Each sync fetch assigns its budget from the helper once, then passes the
     // same value as both signal and timeoutMs (see the attempts:1 pin below).
-    expect((source.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(3);
+    // Note: reduced from 3 to 2 after removing stale JSON pass in 4f3a2d3.
+    expect((source.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(2);
   });
 
   test('the 4 resolve-path fetches keep their literal 6000 (bounded by handleStream)', () => {
@@ -138,7 +139,7 @@ describe('call sites are wired correctly', () => {
     const ctorEnd = source.indexOf('clearCache(sourceId)');
     const ctor = source.slice(ctorStart, ctorEnd);
     expect(ctor).not.toMatch(/AbortSignal\.timeout\(6000\)/);
-    expect((ctor.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(3);
+    expect((ctor.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(2);
   });
 
   test("requires 'os' exactly once and imports the breaker timeout", () => {
@@ -154,7 +155,7 @@ describe('call sites are wired correctly', () => {
     const ctorStart = source.indexOf('constructor(opts = {})');
     const ctorEnd = source.indexOf('clearCache(sourceId)');
     const ctor = source.slice(ctorStart, ctorEnd);
-    expect((ctor.match(/^\s*attempts: 1$/gm) || []).length).toBe(3);
-    expect((ctor.match(/timeoutMs: (?:home)?[bB]udgetMs/g) || []).length).toBe(3);
+    expect((ctor.match(/^\s*attempts: 1$/gm) || []).length).toBe(2);
+    expect((ctor.match(/timeoutMs: (?:home)?[bB]udgetMs/g) || []).length).toBe(2);
   });
 });
