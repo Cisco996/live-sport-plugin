@@ -286,10 +286,10 @@ function parseImageDimensions(buffer) {
 }
 
 function evictIfNeeded() {
-  if (cache.size <= CACHE_MAX_ENTRIES) return;
-  const byAccess = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
-  const excess = cache.size - CACHE_MAX_ENTRIES;
-  for (let i = 0; i < excess; i++) cache.delete(byAccess[i][0]);
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
 }
 
 /**
@@ -309,7 +309,12 @@ async function getImage(rawUrl) {
 
   const hit = cache.get(url);
   if (hit) {
-    if (now < hit.expiresAt) { hit.lastAccess = now; return hit; }
+    if (now < hit.expiresAt) {
+      hit.lastAccess = now;
+      cache.delete(url);
+      cache.set(url, hit);
+      return hit;
+    }
     cache.delete(url);
   }
 
@@ -362,6 +367,7 @@ async function getImage(rawUrl) {
               expiresAt: Date.now() + IMAGE_TTL_MS,
               lastAccess: Date.now()
             };
+            cache.delete(url);
             cache.set(url, result);
             evictIfNeeded();
             break; // Success, exit retry loop

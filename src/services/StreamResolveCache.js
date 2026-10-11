@@ -102,6 +102,8 @@ class StreamResolveCache {
       return null;
     }
     e.lastAccess = now;
+    this.entries.delete(key);
+    this.entries.set(key, e);
     if (e.status !== 'ok') return null;
     return e.streams.map((s) => ({ ...s }));
   }
@@ -115,6 +117,7 @@ class StreamResolveCache {
   _adoptRemote(key, remote) {
     const matchId = key.split(':')[1] || '';
     const streams = Array.isArray(remote.streams) ? remote.streams : [];
+    this.entries.delete(key);
     this.entries.set(key, {
       streams: streams.map((s) => ({ ...s })),
       matchId,
@@ -144,6 +147,8 @@ class StreamResolveCache {
 
     if (existing && existing.expiresAt > now) {
       existing.lastAccess = now;
+      this.entries.delete(key);
+      this.entries.set(key, existing);
       if (existing.status !== 'ok') {
         this.statsCounters.negativeHits++;
         return [];
@@ -244,6 +249,7 @@ class StreamResolveCache {
 
   _set(key, sourceName, matchId, streams, status, ttlMs) {
     const now = Date.now();
+    this.entries.delete(key);
     this.entries.set(key, {
       streams: streams.map((s) => ({ ...s })), // store our own copy
       matchId, status,
@@ -301,11 +307,9 @@ class StreamResolveCache {
   }
 
   _evictIfNeeded() {
-    if (this.entries.size <= this.maxEntries) return;
-    const byAccess = [...this.entries.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
-    const excess = this.entries.size - this.maxEntries;
-    for (let i = 0; i < excess; i++) {
-      this.entries.delete(byAccess[i][0]);
+    while (this.entries.size > this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value;
+      this.entries.delete(oldestKey);
       this.statsCounters.evictions++;
     }
   }
