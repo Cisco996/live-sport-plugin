@@ -636,8 +636,10 @@ function resolveFuzzyMapMatch(title) {
   return null;
 }
 
-function getChannelLogo(title) {
-  if (!title) return null;
+const _CHANNEL_LOGO_CACHE = new Map();
+const _CHANNEL_LOGO_CACHE_MAX = 5000;
+
+function _resolveChannelLogoDirect(title) {
   const rawLower = String(title).toLowerCase().trim();
   const cleaned = cleanChannelTitle(title);
 
@@ -677,6 +679,23 @@ function getChannelLogo(title) {
   }
 
   return null;
+}
+
+function getChannelLogo(title) {
+  if (!title) return null;
+  const key = String(title).trim();
+  if (!key) return null;
+
+  if (_CHANNEL_LOGO_CACHE.has(key)) {
+    return _CHANNEL_LOGO_CACHE.get(key);
+  }
+
+  const result = _resolveChannelLogoDirect(title);
+  if (_CHANNEL_LOGO_CACHE.size >= _CHANNEL_LOGO_CACHE_MAX) {
+    _CHANNEL_LOGO_CACHE.clear();
+  }
+  _CHANNEL_LOGO_CACHE.set(key, result);
+  return result;
 }
 
 module.exports = {

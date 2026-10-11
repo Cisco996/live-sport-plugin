@@ -418,6 +418,9 @@ const COUNTRY_RULES = [
   }
 ];
 
+const _COUNTRY_CACHE = new Map();
+const _COUNTRY_CACHE_MAX = 2000;
+
 class ChannelCountryService {
   /**
    * Detects country, flag, and commentary language for a given channel name.
@@ -426,18 +429,32 @@ class ChannelCountryService {
    */
   static detectChannelCountry(channelName) {
     if (!channelName || typeof channelName !== 'string') return null;
-    const cn = ' ' + channelName.trim() + ' ';
+    const trimmed = channelName.trim();
+    if (!trimmed) return null;
+
+    if (_COUNTRY_CACHE.has(trimmed)) {
+      return _COUNTRY_CACHE.get(trimmed);
+    }
+
+    const cn = ' ' + trimmed + ' ';
+    let result = null;
     for (const rule of COUNTRY_RULES) {
       if (rule.regex.test(cn)) {
-        return {
+        result = {
           flag: rule.flag,
           name: rule.name,
           country: rule.country,
           language: rule.language
         };
+        break;
       }
     }
-    return null;
+
+    if (_COUNTRY_CACHE.size >= _COUNTRY_CACHE_MAX) {
+      _COUNTRY_CACHE.clear();
+    }
+    _COUNTRY_CACHE.set(trimmed, result);
+    return result;
   }
 
   /**
