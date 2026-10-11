@@ -214,7 +214,8 @@ app.get('/api/matches', (req, res) => {
   if (!isLocalDirectRequest(req)) {
     return res.status(403).json({ error: 'Forbidden', reason: 'loopback_only' });
   }
-  const matches = container.resolve('cacheService').getMatches();
+  const cacheService = container.resolve('cacheService');
+  const matches = (cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches());
   res.json(matches);
 });
 
@@ -342,6 +343,11 @@ app.get(['/img/sport/:sport', '/:config/img/sport/:sport'], async (req, res) => 
   await sendRasterizedIfPossible(res, svg);
 });
 
+// Memoised name -> crest. Only SUCCESSES are cached.
+// Lives for the worker's lifetime, bounded to prevent unbounded memory growth.
+const LOGO_BY_NAME = new Map();
+const LOGO_BY_NAME_MAX = 2000;
+
 // /img/match?...         → composed "broadcast" match card. Used when a fixture
 //                          has no official provider artwork: the server designs a
 //                          card from whatever badges/league/channel it could
@@ -428,8 +434,6 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   // caching is already handled correctly a layer down, by TeamLogoService's 24h
   // negative TTL, so a miss here is cheap and must stay retryable.
   // Bounded as well, since this otherwise grows with every name ever requested.
-  const LOGO_BY_NAME = new Map();
-  const LOGO_BY_NAME_MAX = 2000;
   const resolveNameToCrest = async (name) => {
     const raw = qs(name);
     if (!raw) return null;
@@ -938,7 +942,8 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   // matches — on a cold start the cache is empty and hiding everything would be
   // far worse than showing a temporary empty shelf.
   try {
-    const cached = container.resolve('cacheService').getMatches();
+    const cs = container.resolve('cacheService');
+    const cached = (cs.getMatchesReadOnly ? cs.getMatchesReadOnly() : cs.getMatches());
     if (Array.isArray(cached) && cached.length > 0) {
       const present = new Set(cached.map(m => m && m.category).filter(Boolean));
       const replaysAvailable = new Set(
@@ -950,6 +955,16 @@ app.get('/:config?/manifest.json', (req, res, next) => {
         'nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming',
         'nuvio_sports_other', 'nuvio_sports_networks'
       ]);
+      // Pre-extract lowercase network channel titles once to avoid O(C * N) scans per catalog
+      const networkTitles = [];
+      for (let i = 0; i < cached.length; i++) {
+        const m = cached[i];
+        if (m && m.category === 'networks' && m.title) {
+          networkTitles.push(String(m.title).toLowerCase());
+        }
+      }
+      const hasNetworks = networkTitles.length > 0;
+
       newManifest.catalogs = newManifest.catalogs.filter((c) => {
         if (ALWAYS_KEEP.has(c.id)) return true;
 
@@ -965,9 +980,10 @@ app.get('/:config?/manifest.json', (req, res, next) => {
         const cat = c.id.replace('nuvio_sports_', '');
         // Keep 24/7 network-carried sports even when no fixture is scheduled.
         if (present.has(cat)) return true;
-        if (cached.some(m => m && m.category === 'networks')) {
-          const titleLower = (m => String((m && m.title) || '').toLowerCase());
-          if (cached.some(m => m && m.category === 'networks' && titleLower(m).includes(cat))) return true;
+        if (hasNetworks) {
+          for (let i = 0; i < networkTitles.length; i++) {
+            if (networkTitles[i].includes(cat)) return true;
+          }
         }
         return false;
       });
