@@ -19,7 +19,6 @@ This report provides a comprehensive, file-by-file performance and time complexi
 | **P0 (Critical)** | **Aggregator Match Merging:** Unindexed linear scan across all providers ($M \times N$) | $\mathcal{O}(M \cdot N)$ | $\mathcal{O}(M \cdot \frac{N}{B})$ with bucketing / $\mathcal{O}(1)$ on ID | **~85%–90% faster** background provider sync |
 | **P0 (Critical)** | **Match Resolution Lookup:** 4-tier full array scan on user stream clicks | $\mathcal{O}(N)$ (up to $4N$ iterations) | $\mathcal{O}(1)$ Hash Map index | **Instantaneous (< 1ms)** match lookup |
 | **P0 (Critical)** | **Database Deep-Cloning:** Allocates ~24,000 objects per read request in `getMatches()` | $\mathcal{O}(N)$ heap allocation & GC | $\mathcal{O}(1)$ Read-Only View | Eliminates **~10–25 MB heap churn** per request |
-| **P0 (Critical)** | **Base URL Rewriter Middleware:** Intercepts, `JSON.parse`s, traverses, and re-`JSON.stringify`s responses | $\mathcal{O}(S)$ full serialization cycle | $\mathcal{O}(1)$ host injection | Eliminates **20–80ms** event loop stall |
 | **P1 (High)** | **Route-Scoped Memoization:** `LOGO_BY_NAME` reallocated on every request in `/img/match` | $\mathcal{O}(1)$ hit rate dropped to 0% | $\mathcal{O}(1)$ persistent cache hit | Eliminates redundant regexes on crest lookups |
 | **P1 (High)** | **Channel Logo Fuzzy Search:** Scans entire 1.23 MB dataset on unmapped titles | $\mathcal{O}(T)$ dictionary scan | $\mathcal{O}(1)$ memoized result | Prevents multi-millisecond freezes on misses |
 | **P1 (High)** | **Channel Country Detection:** Linearly tests 65 regexes without memoization | $\mathcal{O}(C \cdot R)$ regex tests | $\mathcal{O}(1)$ memoized lookup | Saves **~95%** of regex tests during scraping |
@@ -269,50 +268,7 @@ Introduce `getMatchesReadOnly()` that returns `this.cachedMatches` without cloni
 
 ---
 
-### Hotspot 5: Dynamic Base URL Rewriter Middleware Intercepts & Re-Serializes Responses
-
-* **File:** [`src/index.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L747-L848)
-* **Lines of Interest:** [`src/index.js:747–848`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L747-L848)
-
-#### 1. The Root Cause
-For all requests to `/manifest.json`, `/catalog/*`, `/meta/*`, and `/stream/*`:
-```javascript
-res.end = function (chunk, encoding, callback) {
-  ...
-  const bodyBuffer = Buffer.concat(chunks);
-  const bodyString = bodyBuffer.toString('utf8');
-  try {
-    const body = JSON.parse(bodyString);
-    ...
-    const rewriteUrl = (url) => { ... };
-    // Loops over body.streams, body.metas, body.meta.videos...
-    ...
-    if (modified) {
-      const newBodyString = JSON.stringify(body);
-      const newBuffer = Buffer.from(newBodyString, 'utf8');
-      res.setHeader('Content-Length', newBuffer.length);
-      return originalEnd.call(res, newBuffer, 'utf8', callback);
-    }
-  } catch (_) {}
-}
-```
-1. Express compiles and sends JSON via `res.json(payload)` (`JSON.stringify` to bytes).
-2. Middleware intercepts the stream, decodes it into a large UTF-8 string, and calls `JSON.parse()`.
-3. It traverses every stream, meta, and video object, applying regexes on URLs.
-4. It calls `JSON.stringify(body)` and re-buffers the response.
-
-For catalog responses (500 KB to 2 MB JSON), this cycle of serialization, deserialization, deep AST traversal, and re-serialization consumes **20 to 80 ms of synchronous CPU time per request**.
-
-#### 2. Complexity Analysis
-- **Current:** $\mathcal{O}(S)$ where $S$ is payload size, paying the penalty of two full JSON serialization cycles and recursive object traversal on every response.
-- **Optimal:** $\mathcal{O}(1)$ by generating correct URLs directly in route handlers.
-
-#### 3. Recommended Remediation
-Inject `reqBaseUrl` directly into `handleCatalog`, `handleMeta`, and `handleStream` so URLs are constructed with the client's host during the initial render pass, removing the interceptor completely.
-
----
-
-### Hotspot 6: Route-Scoped Memoization Map in `/img/match`
+### Hotspot 5: Route-Scoped Memoization Map in `/img/match`
 
 * **File:** [`src/index.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L431-L432)
 * **Lines of Interest:** [`src/index.js:431–432`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L431-L432), [`src/index.js:349`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L349)
@@ -340,7 +296,7 @@ Move `const LOGO_BY_NAME = new Map();` outside the route handler into module sco
 
 ---
 
-### Hotspot 7: Full Dictionary Subsequence Scan in `ChannelLogoService`
+### Hotspot 6: Full Dictionary Subsequence Scan in `ChannelLogoService`
 
 * **File:** [`src/services/ChannelLogoService.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/ChannelLogoService.js#L583-L637)
 * **Lines of Interest:** [`src/services/ChannelLogoService.js:583–637`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/ChannelLogoService.js#L583-L637)
@@ -362,7 +318,7 @@ Add a bounded `Map` memoization cache (`Map<rawTitle, resolvedLogo | null>`) at 
 
 ---
 
-### Hotspot 8: Unmemoized Regex Sweeps in `ChannelCountryService`
+### Hotspot 7: Unmemoized Regex Sweeps in `ChannelCountryService`
 
 * **File:** [`src/services/ChannelCountryService.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/ChannelCountryService.js#L427-L441)
 * **Lines of Interest:** [`src/services/ChannelCountryService.js:427–441`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/ChannelCountryService.js#L427-L441)
@@ -385,7 +341,7 @@ Memoize results with a simple `Map<channelName, result | null>`. The cardinality
 
 ---
 
-### Hotspot 9: Nested Array Scans in Manifest Catalog Filtering
+### Hotspot 8: Nested Array Scans in Manifest Catalog Filtering
 
 * **File:** [`src/index.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L968-L971)
 * **Lines of Interest:** [`src/index.js:968–971`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/index.js#L968-L971)
@@ -411,7 +367,7 @@ Pre-extract all lowercase network titles into a concatenated string or array onc
 
 ---
 
-### Hotspot 10: Redundant `new URL()` Object Construction per Playlist Segment
+### Hotspot 9: Redundant `new URL()` Object Construction per Playlist Segment
 
 * **File:** [`src/services/HlsRewriteService.js`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/HlsRewriteService.js#L40-L55)
 * **Lines of Interest:** [`src/services/HlsRewriteService.js:40–55`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/HlsRewriteService.js#L40-L55), [`src/routes/manifest.js:116–138`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/routes/manifest.js#L116-L138)
@@ -441,7 +397,7 @@ Parse `manifestUrl` **once** before iterating over the playlist lines, or pass t
 
 ---
 
-### Hotspot 11: Minor Algorithmic Inefficiencies
+### Hotspot 10: Minor Algorithmic Inefficiencies
 
 1. **$\mathcal{O}(K^2)$ Memory Moves with `Array.prototype.shift()`**
    * **File:** [`src/services/MatchAggregator.js:698–701`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/src/services/MatchAggregator.js#L698-L701)
@@ -473,7 +429,6 @@ Parse `manifestUrl` **once** before iterating over the playlist lines, or pass t
 │   • Schwartzian transform on catalog match sort (catalog.js)                │
 │   • Read-only view in CacheService.getMatches() (eliminate deep clone)      │
 │   • Indexed O(1) lookups in CacheService.findMatch()                        │
-│   • Direct host injection in index.js (retire response interceptor)         │
 │                                                                             │
 │ PHASE 2: Aggregation & Merging Scalability (High P1)                        │
 │   • Category bucketing & exact ID indexing in MatchAggregator.syncMatches() │
@@ -495,5 +450,4 @@ When applying these performance improvements, verify the following contracts:
 
 1. **Ordering Consistency:** Verify that `compareCatalogMatches` produces the exact same ordering for Live, Upcoming, Replays, and 24/7 channels as asserted by existing test suites.
 2. **Immutability Protection:** Ensure that returning a read-only match array from `CacheService` does not leak stream state when `handleStream` mutates individual streams.
-3. **URL Integrity:** Confirm that removing the rewriter middleware preserves all relative and absolute URLs across Nuvio and Stremio clients on various host protocols.
-4. **Merge Accuracy:** Run aggregation regression tests to ensure category bucketing does not prevent valid merges of `'college'`/`'other'` events.
+3. **Merge Accuracy:** Run aggregation regression tests to ensure category bucketing does not prevent valid merges of `'college'`/`'other'` events.
