@@ -314,6 +314,59 @@ function compareCatalogMatches(a, b, isReplayMode = false) {
   return 0;
 }
 
+/**
+ * High-performance Schwartzian Transform sort for catalog fixtures.
+ * Evaluates expensive Unicode normalizations, regular expressions (80+ patterns in getMatchTier),
+ * date parsing, and live status ONCE per match in O(N), then sorts using fast primitive numeric
+ * comparisons in O(N log N).
+ */
+function sortCatalogMatches(matches, isReplayMode = false) {
+  if (!Array.isArray(matches) || matches.length <= 1) return matches || [];
+
+  const isRealFixture = (m) => (m && m.category !== 'networks' && (!!m.date || !!m.team1 || !!m.team2 || (typeof m.title === 'string' && (m.title.includes(' vs ') || m.title.includes(' @ '))))) ? 1 : 0;
+
+  const len = matches.length;
+  const decorated = new Array(len);
+  for (let i = 0; i < len; i++) {
+    const m = matches[i];
+    decorated[i] = {
+      m,
+      isLive: isMatchLive(m) ? 1 : 0,
+      isReal: isRealFixture(m),
+      tier: getMatchTier(m),
+      pop: m && m.popular === '1' ? 1 : 0,
+      kickoff: m && m.date ? getKickoff(m.date) : 0,
+      idx: i,
+    };
+  }
+
+  decorated.sort((a, b) => {
+    if (a.isLive !== b.isLive) return b.isLive - a.isLive;
+    if (a.isReal !== b.isReal) return b.isReal - a.isReal;
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.pop !== b.pop) return b.pop - a.pop;
+
+    if (a.kickoff > 0 && b.kickoff > 0) {
+      if (isReplayMode || a.isLive) {
+        return b.kickoff - a.kickoff;
+      } else {
+        return a.kickoff - b.kickoff;
+      }
+    } else if (a.kickoff > 0 && b.kickoff === 0) {
+      return -1;
+    } else if (a.kickoff === 0 && b.kickoff > 0) {
+      return 1;
+    }
+    return a.idx - b.idx;
+  });
+
+  const result = new Array(len);
+  for (let i = 0; i < len; i++) {
+    result[i] = decorated[i].m;
+  }
+  return result;
+}
+
 function normalizeImageUrl(url, defaultHost = '') {
   if (!url || typeof url !== 'string') return null;
   let u = url.trim();
@@ -834,7 +887,7 @@ async function buildReplayHubMeta(id, config = {}) {
   if (_rhmCached) return _rhmCached;
 
   const cacheService = container.resolve('cacheService');
-  let rawMatches = cacheService.getMatches() || [];
+  let rawMatches = (cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches()) || [];
 
   if (rawMatches.length === 0 || !rawMatches.some(m => isReplayMatch(m))) {
     try {
@@ -1082,7 +1135,7 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   let filterType = sub.replace(targetSport, '').replace(/^_/, ''); // e.g. '', 'recent', 'premier_league', 'ucl', 'f1', 'nba', 'mlb'
 
   const cacheService = container.resolve('cacheService');
-  let rawMatches = cacheService.getMatches() || [];
+  let rawMatches = (cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches()) || [];
   if (rawMatches.length === 0 || !rawMatches.some(m => isReplayMatch(m))) {
     try {
       const aggregator = container.resolve('matchAggregator');
@@ -1207,7 +1260,7 @@ async function handleCatalogUncached(type, id, extra, config) {
   }
   // Use CacheService instead of hitting APIs on demand
   const cacheService = container.resolve('cacheService');
-  const rawMatches = cacheService.getMatches() || [];
+  const rawMatches = (cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches()) || [];
   const matches = rawMatches.filter(m => m && Array.isArray(m.sources) && m.sources.length > 0);
   
   let filteredMatches = matches;
@@ -1284,7 +1337,7 @@ async function handleCatalogUncached(type, id, extra, config) {
     return true;
   });
 
-  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode));
+  filteredMatches = sortCatalogMatches(filteredMatches, isReplayMode);
 
   if (categoryMatch === 'replays' && (!extra || !extra.search)) {
     let targetSports = REPLAY_SPORTS;
@@ -1529,6 +1582,7 @@ module.exports = {
   getKickoff,
   getEventDurationMs,
   compareCatalogMatches,
+  sortCatalogMatches,
   SPORT_MAX_DURATION_MS,
   REPLAY_SPORTS,
   getMatchTier
