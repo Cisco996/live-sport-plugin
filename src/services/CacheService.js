@@ -34,6 +34,10 @@ class CacheService {
     this.rev = 0;
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
     this.cacheFilePath = resolveCacheFile();
+    this._byId = new Map();
+    this._byAlias = new Map();
+    this._bySourceId = new Map();
+    this._indexedMatchesRef = null;
     this._loadDiskCache();
   }
 
@@ -92,10 +96,53 @@ class CacheService {
         this.lastFetchTime = parsed.timestamp || stats.mtimeMs;
         this.lastDiskMtime = stats.mtimeMs;
         this.rev++;
+        this._rebuildIndices();
         return true;
       }
     } catch (_) {}
     return false;
+  }
+
+  _rebuildIndices() {
+    this._byId = new Map();
+    this._byAlias = new Map();
+    this._bySourceId = new Map();
+
+    const matches = this.cachedMatches;
+    if (Array.isArray(matches)) {
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        if (!m || typeof m !== 'object') continue;
+
+        if (m.id && typeof m.id === 'string') {
+          this._byId.set(m.id, m);
+        }
+
+        if (Array.isArray(m.aliasIds)) {
+          for (let j = 0; j < m.aliasIds.length; j++) {
+            const aid = m.aliasIds[j];
+            if (aid && typeof aid === 'string') {
+              this._byAlias.set(aid, m);
+            }
+          }
+        }
+
+        if (Array.isArray(m.sources)) {
+          for (let j = 0; j < m.sources.length; j++) {
+            const s = m.sources[j];
+            if (s && s.id != null) {
+              const sid = String(s.id);
+              this._bySourceId.set(sid, m);
+              if (!sid.startsWith('stream_')) {
+                this._bySourceId.set(`stream_${sid}`, m);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    this._indexedMatchesRef = this.cachedMatches;
   }
 
   _saveDiskCache(matches) {
@@ -123,10 +170,16 @@ class CacheService {
     return this._clone(this.cachedMatches);
   }
 
+  getMatchesReadOnly() {
+    this._ensureLoaded();
+    return this.cachedMatches || [];
+  }
+
   setMatches(matches) {
     this.cachedMatches = this._clone(matches);
     this.lastFetchTime = Date.now();
     this.rev++;
+    this._rebuildIndices();
     this._saveDiskCache(matches);
   }
 
@@ -147,19 +200,23 @@ class CacheService {
     const matches = this.cachedMatches;
     if (!Array.isArray(matches) || matches.length === 0) return null;
 
-    // 1. Direct primary ID match
-    let found = matches.find(m => m && m.id === matchId);
+    // Self-healing: if indices were not built or cachedMatches was updated/reassigned directly
+    if (!this._byId || this._indexedMatchesRef !== matches) {
+      this._rebuildIndices();
+    }
+
+    // Fast O(1) Indexed Lookups
+    let found = this._byId.get(matchId);
+    if (!found) found = this._byAlias.get(matchId);
+    if (!found) found = this._bySourceId.get(matchId);
+
     if (found) return this._cloneMatch(found);
 
-    // 2. Alias IDs (merged IDs from other providers during aggregator sync)
-    found = matches.find(m => m && Array.isArray(m.aliasIds) && m.aliasIds.includes(matchId));
+    // Fallback: substring source ID match (rare legacy IDs)
+    found = matches.find(m => m && Array.isArray(m.sources) && m.sources.some(s => s && s.id != null && String(s.id).includes(matchId)));
     if (found) return this._cloneMatch(found);
 
-    // 3. Source ID match (any source within the match has this ID)
-    found = matches.find(m => m && Array.isArray(m.sources) && m.sources.some(s => s && (s.id === matchId || s.id === `stream_${matchId}` || String(s.id).includes(matchId))));
-    if (found) return this._cloneMatch(found);
-
-    // 4. Normalized slug match (e.g. "cleveland-guardians" or team names in matchId)
+    // Fallback: Normalized slug match (e.g. "cleveland-guardians" or team names in matchId)
     const cleanId = matchId.toLowerCase().replace(/^[a-z0-9]+_[0-9]+_/, '').replace(/[^a-z0-9]/g, '');
     if (cleanId.length > 6) {
       found = matches.find(m => {
