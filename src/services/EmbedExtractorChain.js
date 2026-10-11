@@ -133,14 +133,35 @@ function extractPatternC(html) {
         // 3. ((n ^ key1) + key2)
         // 4. ((n - key2) ^ key1)
         const decoders = [
-          n => String.fromCharCode((n ^ (key1 - key2) + 256) % 256),
-          n => String.fromCharCode((((n ^ key1) - key2 + 256) & 255)),
-          n => String.fromCharCode((((n ^ key1) + key2 + 256) & 255)),
-          n => String.fromCharCode((((n - key2) ^ key1 + 256) & 255))
+          n => (n ^ (key1 - key2) + 256) % 256,
+          n => (((n ^ key1) - key2 + 256) & 255),
+          n => (((n ^ key1) + key2 + 256) & 255),
+          n => (((n - key2) ^ key1 + 256) & 255)
         ];
         for (const dec of decoders) {
           try {
-            const decoded = nums.map(dec).join('');
+            // Early-exit heuristic: inspect a sample prefix (first 24 characters).
+            // Valid JavaScript / HTML / URL text consists of printable ASCII (32-126)
+            // or whitespace (9, 10, 13). Invalid decryptions produce non-printable control
+            // characters or high bytes ~62% of the time. Exiting early when >15% of the
+            // sample is binary garbage skips 95%+ of invalid candidate keys immediately
+            // without allocating arrays or strings across the entire payload.
+            const sampleSize = Math.min(24, nums.length);
+            const maxBad = Math.max(2, Math.floor(sampleSize * 0.15));
+            let bad = 0;
+            for (let s = 0; s < sampleSize; s++) {
+              const code = dec(nums[s]);
+              if (code < 32 ? (code !== 9 && code !== 10 && code !== 13) : code > 126) {
+                bad++;
+                if (bad > maxBad) break;
+              }
+            }
+            if (bad > maxBad) continue;
+
+            let decoded = '';
+            for (let i = 0; i < nums.length; i++) {
+              decoded += String.fromCharCode(dec(nums[i]));
+            }
             if (decoded.includes('.m3u8')) {
               const urlMatch = decoded.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
               if (urlMatch) return urlMatch[1];
