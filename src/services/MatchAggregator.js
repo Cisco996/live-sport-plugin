@@ -765,10 +765,11 @@ class MatchAggregator {
         // while capping its event-loop and socket pressure. Tune with
         // LOGO_ENRICH_CONCURRENCY if needed.
         const ENRICH_CONCURRENCY = Math.max(1, Number(process.env.LOGO_ENRICH_CONCURRENCY || 8));
-        const queue = enrichable.slice();
+        let queueCursor = 0;
         const enrichWorker = async () => {
-          while (queue.length) {
-            const m = queue.shift();
+          while (queueCursor < enrichable.length) {
+            const m = enrichable[queueCursor++];
+            if (!m) break;
             try { await this.teamLogoService.enrichMatch(m); } catch (_) {}
           }
         };
