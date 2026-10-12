@@ -91,7 +91,7 @@ class PpvStProvider extends BaseProvider {
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
     const embedUrl = src.embedUrl;
-    if (!embedUrl || !embedUrl.includes('embedindia')) return streams;
+    if (!embedUrl || !embedUrl.startsWith('http')) return streams;
 
     let referer = 'https://embedindia.st/';
     try { referer = new URL(embedUrl).origin + '/'; } catch(e) {}
