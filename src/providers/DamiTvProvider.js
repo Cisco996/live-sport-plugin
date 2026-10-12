@@ -16,6 +16,11 @@ const ROLLING_WINDOW_TOLERANCE_S = 90;
 const MATCHES_ALL_URL = 'https://damitv.st/papi/matches/all';
 const EXTRACT_URL_BASE = 'https://damitv.st/papi/extract-url/';
 
+const DAMITV_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+  'Referer': 'https://damitv.st/'
+};
+
 class DamiTvProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -25,7 +30,7 @@ class DamiTvProvider extends BaseProvider {
     this.embedIndiaProvider = opts.embedIndiaProvider;
 
     this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
-      const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
+      const res = await this.proxyFetch(this.apiUrl, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     });
@@ -33,7 +38,7 @@ class DamiTvProvider extends BaseProvider {
     // Secondary feed for the 24/7 channels. Non-fatal: a failure here only
     // costs the 24/7 row, not the fixture schedule.
     this.fetchAllMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchAll`, async () => {
-      const res = await this.proxyFetch(MATCHES_ALL_URL, { signal: AbortSignal.timeout(15000) });
+      const res = await this.proxyFetch(MATCHES_ALL_URL, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     });
