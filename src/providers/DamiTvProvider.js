@@ -269,6 +269,7 @@ class DamiTvProvider extends BaseProvider {
       try {
         const extractRes = await this.proxyFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
           headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Referer': embedUrl
           },
           signal: AbortSignal.timeout(8000)
@@ -310,7 +311,11 @@ class DamiTvProvider extends BaseProvider {
       if (streams.length === 0) {
         try {
           const msRes = await this.proxyFetch('https://damitv.st/data/manual-sources.json?t=' + Date.now(), {
-             timeoutMs: 5000
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              'Referer': 'https://damitv.st/'
+            },
+            timeoutMs: 5000
           });
           if (msRes.ok) {
              const msData = await msRes.json();

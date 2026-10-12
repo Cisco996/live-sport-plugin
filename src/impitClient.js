@@ -119,6 +119,17 @@ async function safeFetch(url, opts = {}) {
   const impit = proxyUrl ? getProxyImpit(proxyUrl) : getImpit();
   const maxAttempts = Math.max(1, attempts);
 
+  if (isDamitv) {
+    const headerKeys = Object.keys(headers || {});
+    const hasUa = headerKeys.some(k => k.toLowerCase() === 'user-agent');
+    const hasRef = headerKeys.some(k => k.toLowerCase() === 'referer');
+    headers = {
+      ...(hasUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
+      ...(hasRef ? {} : { 'Referer': 'https://damitv.st/' }),
+      ...headers,
+    };
+  }
+
   // -- Path A: impit ---------------------------------------------------------
   if (impit) {
     let lastErr = null;
@@ -154,6 +165,10 @@ async function safeFetch(url, opts = {}) {
             json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
             arrayBuffer: async () => buf,
           };
+          if (proxyUrl) {
+            // Proxied requests must never fall back to undici (which bypasses proxy)
+            return impit403;
+          }
           console.warn(`[impitClient] impit got 403, trying undici once for: ${url.slice(0, 90)}`);
           try {
             return await undiciPath(method, headers, body, url, signal, timeoutMs);
@@ -183,6 +198,9 @@ async function safeFetch(url, opts = {}) {
         // timer holding the event loop (timer churn under load).
         if (timer) clearTimeout(timer);
       }
+    }
+    if (proxyUrl) {
+      throw lastErr || new Error(`[impitClient] impit proxy fetch failed for ${url}`);
     }
     const cleanErr = lastErr && lastErr.message 
       ? lastErr.message.replace(/\s+/g, ' ').trim() 
