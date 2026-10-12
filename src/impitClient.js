@@ -51,6 +51,38 @@ function getImpit() {
   return _impitInstance;
 }
 
+let _impitProxyInstance;
+let _impitProxyBornAt = 0;
+let _impitProxyUrl = null;
+
+function getProxyImpit(proxyUrl) {
+  if (!proxyUrl) return getImpit();
+  if (_impitProxyInstance && (_impitProxyUrl !== proxyUrl || Date.now() - _impitProxyBornAt > IMPIT_RECYCLE_MS)) {
+    console.log('[impitClient] recycling proxy impit instance');
+    _impitProxyInstance = undefined;
+    if (typeof global.gc === 'function') {
+      try { global.gc(); } catch (_) {}
+    }
+  }
+  if (_impitProxyInstance !== undefined) return _impitProxyInstance;
+  try {
+    const { Impit } = require('impit');
+    _impitProxyInstance = new Impit({ browser: 'chrome142', proxyUrl });
+    _impitProxyBornAt = Date.now();
+    _impitProxyUrl = proxyUrl;
+    console.log(`[impitClient] impit proxy client initialized with ${proxyUrl}`);
+  } catch (e) {
+    _impitProxyInstance = null;
+    console.warn(`[impitClient] impit proxy client unavailable (${e.message}).`);
+  }
+  return _impitProxyInstance;
+}
+
+function isDamitvTarget(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.includes('damitv.st');
+}
+
 // -- Shared undici keep-alive agent -------------------------------------------
 const _undiciAgent = new Agent({
   connect: { timeout: 20000, rejectUnauthorized: false },
@@ -67,7 +99,7 @@ const MAX_REDIRECT_HOPS = 5;
  * safeFetch - fetches a URL using impit when available, falls back to undici.
  *
  * @param {string} url
- * @param {object} opts   - { method, headers, body, signal, timeoutMs, attempts }
+ * @param {object} opts   - { method, headers, body, signal, timeoutMs, attempts, proxyUrl }
  *   attempts: how many times to try the impit path before falling back to
  *   undici (default 3). Callers that run their own retry policy should pass 1,
  *   so the two layers do not multiply: three impit tries at a 5s timeout plus
@@ -79,7 +111,12 @@ async function safeFetch(url, opts = {}) {
   // Method, headers and body are reassigned per redirect hop on the undici path
   // (see the redirect loop below), so they cannot be destructured as const.
   let { method = 'GET', headers = {}, body } = opts;
-  const impit = getImpit();
+
+  // Selective proxying: route DamiTV requests through local WARP SOCKS5 proxy if configured
+  const warpProxyUrl = process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL;
+  const isDamitv = isDamitvTarget(url);
+  const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
+  const impit = proxyUrl ? getProxyImpit(proxyUrl) : getImpit();
   const maxAttempts = Math.max(1, attempts);
 
   // -- Path A: impit ---------------------------------------------------------
@@ -242,4 +279,4 @@ function isImpitAvailable() {
   return getImpit() !== null;
 }
 
-module.exports = { safeFetch, isImpitAvailable, getImpit };
+module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget };
