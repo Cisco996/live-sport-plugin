@@ -205,4 +205,46 @@ describe('verifyStreams speed probe', () => {
     // targetDuration is still useful and comes from the playlist itself.
     expect(out[0].targetDuration).toBe(5);
   });
+
+  describe('bitrate and resolution enrichment', () => {
+    // Segment: 4,084,906 bytes total, 4.0s duration → impliedBitrate = 8,169,812 bps ≈ 8.2 Mbps → 1080p60
+    it('stores bitrate tag and upgrades HD to 1080p60 when impliedBitrate >= 5.5 Mbps', async () => {
+      safeFetch.mockResolvedValue(ok());
+      const out = await verifyStreams(
+        [{ ...stream(), resolution: 'HD' }],
+        'test:m1:s1', parser, makeCache()
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0].bitrate).toMatch(/Mbps/);
+      expect(out[0].resolution).toBe('1080p60');
+    });
+
+    it('keeps the stream and does NOT set bitrate when Content-Range is missing (no crash)', async () => {
+      safeFetch.mockResolvedValue(ok());
+      global.fetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => Buffer.alloc(200000).buffer,
+        headers: { get: () => null }, // No Content-Range
+      });
+      const out = await verifyStreams(
+        [{ ...stream(), resolution: 'HD' }],
+        null, parser, makeCache()
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0].bitrate).toBeUndefined();
+      expect(out[0].resolution).toBe('HD'); // unchanged — no data to upgrade from
+    });
+
+    it('does NOT overwrite bitrate already set by parseManifestText (Master Playlist wins)', async () => {
+      safeFetch.mockResolvedValue(ok());
+      const out = await verifyStreams(
+        [{ ...stream(), resolution: '1080p', bitrate: '5.2 Mbps' }], // already set
+        'test:m1:s1', parser, makeCache()
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0].bitrate).toBe('5.2 Mbps');      // untouched
+      expect(out[0].resolution).toBe('1080p');       // untouched (not 'HD')
+    });
+  });
 });
+

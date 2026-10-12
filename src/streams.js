@@ -320,6 +320,24 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
       stream.segmentTtfbMs = Math.round(headersAt - start);
       stream.downloadMbps = Math.round((measuredDownloadRate / 1000000) * 10) / 10;
       stream.targetDuration = info.targetDuration || stream.targetDuration || null;
+
+      // ── NEW: Persist the measured stream bitrate for display ─────────────────
+      if (!stream.bitrate && impliedBitrate > 0) {
+        stream.bitrate = impliedBitrate >= 1000000
+          ? `${(impliedBitrate / 1000000).toFixed(1)} Mbps`
+          : `${Math.round(impliedBitrate / 1000)} kbps`;
+      }
+
+      // ── NEW: Upgrade generic 'HD' placeholder to real resolution tier ─────────
+      // Only applies when: (a) the provider set the fallback 'HD', AND
+      // (b) we have a measured bitrate to base this on.
+      // Master Playlist streams already have the exact resolution from parseManifestText().
+      if (stream.resolution === 'HD' && impliedBitrate > 0) {
+        if (impliedBitrate >= 5500000)      stream.resolution = '1080p60'; // 60fps sports broadcast
+        else if (impliedBitrate >= 3800000) stream.resolution = '1080p';   // standard 1080p feed
+        else if (impliedBitrate >= 2000000) stream.resolution = '720p';    // standard HD restream
+        else                                stream.resolution = 'SD';      // sub-720p compressed
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -869,7 +887,8 @@ async function handleStream(type, id, config) {
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
-    s.title = `${icon} ${providerName}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${viewersText}${speedText}`;
+    const bitrateText = s.bitrate ? ` · ${s.bitrate}` : '';
+    s.title = `${icon} ${providerName}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
