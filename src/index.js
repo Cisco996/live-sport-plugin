@@ -12,6 +12,7 @@
  * from any origin without a networkError_manifestLoadError.
  */
 
+require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const { getRouter } = require('stremio-addon-sdk');
