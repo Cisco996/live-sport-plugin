@@ -53,7 +53,7 @@ class SkTechProvider extends BaseProvider {
           team2: m.teamB && m.teamB.name ? { name: m.teamB.name, logo: m.teamB.logo } : null,
           poster: m.poster || undefined,
           thumbnail_url: m.poster || undefined,
-          sources: [{
+          sources: m.sources || [{
             source: 'sktech',
             id: m.linkPath,
             channelName: m.title,
@@ -100,7 +100,7 @@ class SkTechProvider extends BaseProvider {
   }
 
   /**
-   * Resolves direct playable streams for fixtures and 24/7 channels
+   * Resolves direct playable streams for fixtures, dynamic event feeds, and 24/7 channels
    * Strict Constraints: 0 Server Bandwidth, 0 Cloudflare Workers
    *
    * @param {string} sourceId
@@ -114,12 +114,36 @@ class SkTechProvider extends BaseProvider {
     const targetLink = src.links || src.id || sourceId;
 
     try {
-      // Branch A: Fixture link path or direct pro/ link
+      // Branch A: Direct dynamic event stream (FanCode, Sony LIV, etc.)
+      const eventStream = (src.type === 'fancode_direct' || src.streamUrl)
+        ? src
+        : this.matchResolver.getEventStream(sourceId);
+
+      if (eventStream && eventStream.streamUrl) {
+        return [new StreamEntity({
+          name: 'SK Tech',
+          title: eventStream.streamTitle || `SK Tech (${eventStream.channelName || 'FanCode'})`,
+          url: eventStream.streamUrl,
+          resolution: eventStream.resolution || '1080p',
+          score: 95,
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: {
+              request: eventStream.streamHeaders || {
+                'User-Agent': 'ReactNativeVideo/9.11.1 (Linux;Android 13) AndroidXMedia3/1.6.1',
+                Referer: 'https://fancode.com/'
+              }
+            }
+          }
+        })];
+      }
+
+      // Branch B: Fixture link path or direct pro/ link
       if (src.type === 'fixture' || (targetLink && targetLink.startsWith('pro/'))) {
         const fixtureStreams = await this.matchResolver.resolveMatchStreams(targetLink, matchTitle);
         rawCandidates.push(...fixtureStreams);
       }
-      // Branch B: 24/7 TV Channel item
+      // Branch C: 24/7 TV Channel item
       else {
         const channelStreams = await this.channelResolver.resolveChannelStream({
           ...src,

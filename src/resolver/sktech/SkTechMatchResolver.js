@@ -6,9 +6,17 @@ const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
 const BASE_API_URL = 'https://dk01-64n.pages.dev/';
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+const DYNAMIC_EVENT_FEEDS = [
+  { label: 'FanCode', url: 'https://raw.githubusercontent.com/doctor-8trange/zyphx8/refs/heads/main/data/fancode.m3u' },
+  { label: 'Sony LIV', url: 'https://nonyliv.saqlainhaider8198.workers.dev/nony2.m3u' }
+];
+
 class SkTechMatchResolver {
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || BASE_API_URL;
+    this._dynamicCache = null;
+    this._dynamicCacheTime = 0;
+    this._eventStreamCache = new Map();
   }
 
   /**
@@ -26,6 +34,29 @@ class SkTechMatchResolver {
     if (c.includes('baseball') || c.includes('mlb')) return 'baseball';
     if (c.includes('hockey') || c.includes('nhl')) return 'hockey';
     return 'other';
+  }
+
+  /**
+   * Cleans raw M3U titles by stripping language tags, emojis, and brackets
+   */
+  cleanEventTitle(rawTitle, tvgName = '') {
+    let title = (tvgName && /\bvs\b/i.test(tvgName)) ? tvgName : (rawTitle || tvgName || '');
+    title = title.replace(/^(?:ENG|HIN|BEN|TAM|TEL|MAL|KAN|MAR|GUJ|PUN|URD|SPA|POR|ARA)\s*\|\s*/i, '');
+    title = title.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]\s*/u, '');
+    title = title.replace(/^\[[^\]]+\]\s*/, '');
+    title = title.replace(/\s*-\s*(?:MD\s*\d+\s*-\s*)?\d{1,2}\s+[A-Za-z]+\s+\d{4}.*$/i, '');
+    title = title.replace(/\s*\[LIVE\].*$/i, '');
+    title = title.replace(/\s*\|\s*(?:Español|English|Hindi).*$/i, '');
+    title = title.replace(/\s+\d+\s*\([^)]+\)$/, '');
+    title = title.replace(/\s+Vs\s+/i, ' vs ').trim();
+    return title;
+  }
+
+  /**
+   * Retrieves cached direct event stream metadata by source ID
+   */
+  getEventStream(sourceId) {
+    return this._eventStreamCache.get(sourceId) || null;
   }
 
   /**
@@ -49,7 +80,7 @@ class SkTechMatchResolver {
    * Ingest and decrypt all live sports events from `events.txt`
    * @returns {Promise<Array<Object>>} Normalized live fixtures
    */
-  async fetchLiveMatches() {
+  async fetchEventsTxtMatches() {
     const url = `${this.baseUrl}events.txt`;
     const res = await fetch(url, {
       headers: { 'User-Agent': DEFAULT_UA }
@@ -97,6 +128,135 @@ class SkTechMatchResolver {
     }
 
     return matches;
+  }
+
+  /**
+   * Fetches and unpacks discrete live sports events from dynamic M3U event feeds
+   * (e.g. FanCode, Sony LIV) into distinct MatchEntities with playable direct HLS streams.
+   *
+   * @returns {Promise<Array<Object>>}
+   */
+  async fetchDynamicM3uMatches() {
+    const now = Date.now();
+    if (this._dynamicCache && (now - this._dynamicCacheTime < 180000)) {
+      return this._dynamicCache;
+    }
+
+    const matches = [];
+    const matchMap = new Map();
+
+    const feedPromises = DYNAMIC_EVENT_FEEDS.map(async (feed) => {
+      try {
+        const res = await fetch(feed.url, {
+          headers: { 'User-Agent': DEFAULT_UA },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (!res.ok) return;
+
+        const text = await res.text();
+        const lines = text.split(/\r?\n/);
+
+        let curMeta = null;
+        let curOpts = {};
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line) continue;
+
+          if (line.startsWith('#EXTINF:')) {
+            curMeta = {};
+            curOpts = {};
+            const idM = line.match(/tvg-id="([^"]+)"/i);
+            const nameM = line.match(/tvg-name="([^"]+)"/i);
+            const logoM = line.match(/tvg-logo="([^"]+)"/i);
+            const langM = line.match(/tvg-language="([^"]+)"/i);
+            const groupM = line.match(/group-title="([^"]+)"/i);
+            const commaIdx = line.indexOf(',');
+
+            curMeta.tvgId = idM ? idM[1] : '';
+            curMeta.tvgName = nameM ? nameM[1] : '';
+            curMeta.logo = logoM ? logoM[1] : '';
+            curMeta.lang = langM ? langM[1] : '';
+            curMeta.group = groupM ? groupM[1] : '';
+            curMeta.rawTitle = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '';
+          } else if (line.startsWith('#EXTVLCOPT:')) {
+            const opt = line.slice(11).trim();
+            const [k, v] = opt.split('=');
+            if (k && v) {
+              if (/referrer/i.test(k)) curOpts['Referer'] = v;
+              if (/user-agent/i.test(k)) curOpts['User-Agent'] = v;
+            }
+          } else if (line.startsWith('http') && curMeta) {
+            const parsed = SkTechEmbedExtractor.parseDelimited(line);
+            if (parsed.url) {
+              const clean = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
+              const cat = this.normalizeCategory(curMeta.group);
+              const mapKey = `${cat}:${clean.toLowerCase()}`;
+              const feedKey = feed.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const srcId = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${(curMeta.lang || 'def').toLowerCase()}`;
+
+              const srcObj = {
+                source: 'sktech',
+                id: srcId,
+                channelName: curMeta.lang ? `${feed.label} (${curMeta.lang})` : feed.label,
+                type: 'fancode_direct',
+                streamUrl: parsed.url,
+                streamHeaders: { ...curOpts, ...parsed.headers },
+                streamTitle: curMeta.lang && curMeta.lang.toLowerCase() !== 'english'
+                  ? `SK Tech (${feed.label} ${curMeta.lang})`
+                  : `SK Tech (${feed.label})`
+              };
+
+              this._eventStreamCache.set(srcId, srcObj);
+
+              if (matchMap.has(mapKey)) {
+                matchMap.get(mapKey).sources.push(srcObj);
+              } else {
+                const teamParts = clean.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
+                const teamA = teamParts.length === 2 ? { name: teamParts[0].trim(), logo: '' } : null;
+                const teamB = teamParts.length === 2 ? { name: teamParts[1].trim(), logo: '' } : null;
+
+                const matchObj = {
+                  id: `sktech_ev_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}`,
+                  title: clean,
+                  category: cat,
+                  kickoff: Date.now(),
+                  rawCategory: curMeta.group || `${feed.label} Live`,
+                  teamA,
+                  teamB,
+                  poster: curMeta.logo,
+                  sources: [srcObj]
+                };
+
+                matchMap.set(mapKey, matchObj);
+                matches.push(matchObj);
+              }
+            }
+            curMeta = null;
+            curOpts = {};
+          }
+        }
+      } catch (_) {}
+    });
+
+    await Promise.allSettled(feedPromises);
+
+    this._dynamicCache = matches;
+    this._dynamicCacheTime = now;
+    return matches;
+  }
+
+  /**
+   * Unified ingestion of both Pillar 1A (events.txt) and Pillar 1B (FanCode & Sony LIV M3Us)
+   * @returns {Promise<Array<Object>>}
+   */
+  async fetchLiveMatches() {
+    const [eventsTxtMatches, dynamicM3uMatches] = await Promise.all([
+      this.fetchEventsTxtMatches().catch(() => []),
+      this.fetchDynamicM3uMatches().catch(() => [])
+    ]);
+
+    return [...eventsTxtMatches, ...dynamicM3uMatches];
   }
 
   /**
