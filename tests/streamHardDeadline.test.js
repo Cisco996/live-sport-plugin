@@ -11,12 +11,17 @@ function deferred() {
 const playable = url => ({ url, _source: 'watchfooty', title: 'Main feed' });
 
 describe('handleStream hard response deadline', () => {
-  const env = { soft: process.env.STREAM_SOFT_DEADLINE_MS, hard: process.env.STREAM_HARD_DEADLINE_MS };
+  const env = {
+    soft: process.env.STREAM_SOFT_DEADLINE_MS,
+    hard: process.env.STREAM_HARD_DEADLINE_MS,
+    donation: process.env.DONATION_URL
+  };
   let pending;
   beforeEach(() => {
     jest.useFakeTimers();
     process.env.STREAM_SOFT_DEADLINE_MS = '100';
     process.env.STREAM_HARD_DEADLINE_MS = '200';
+    process.env.DONATION_URL = 'disabled';
     pending = [deferred(), deferred()];
     const match = { id: 'deadline', title: 'Team A vs Team B', category: 'football',
       sources: [{ source: 'watchfooty', id: 'a' }, { source: 'timstreams', id: 'b' }] };
@@ -29,7 +34,11 @@ describe('handleStream hard response deadline', () => {
   });
   afterEach(() => {
     jest.useRealTimers();
-    for (const [key, value] of [['STREAM_SOFT_DEADLINE_MS', env.soft], ['STREAM_HARD_DEADLINE_MS', env.hard]]) {
+    for (const [key, value] of [
+      ['STREAM_SOFT_DEADLINE_MS', env.soft],
+      ['STREAM_HARD_DEADLINE_MS', env.hard],
+      ['DONATION_URL', env.donation]
+    ]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
     jest.clearAllMocks();
