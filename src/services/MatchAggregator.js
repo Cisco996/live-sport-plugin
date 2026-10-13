@@ -126,14 +126,34 @@ function _compoundify(t) {
     [/\bmiami\s*heat\b|\bheat\b/g, 'miamiheat'],
     [/\bdenver\s*nuggets\b|\bnuggets\b/g, 'denvernuggets'],
     [/\bmilwaukee\s*bucks\b|\bbucks\b/g, 'milwaukeebucks'],
+    // Vietnamese clubs / cities
+    [/\bha\s*noi\b/g, 'hanoi'],
+    [/\bho\s*chi\s*minh\b/g, 'hochiminh'],
+    [/\bda\s*nang\b/g, 'danang'],
+    [/\bthe\s*cong\b/g, 'thecong'],
+    [/\bnam\s*dinh\b/g, 'namdinh'],
+    [/\bbinh\s*duong\b|\bbihn\s*duong\b/g, 'binhduong'],
   ];
   let r = t.toLowerCase();
   for (const [regex, rep] of aliases) r = r.replace(regex, rep);
   return r;
 }
 
+function _stripDiacritics(str) {
+  if (!str) return '';
+  return String(str)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .replace(/[øØ]/g, 'o')
+    .replace(/[æÆ]/g, 'ae')
+    .replace(/[œŒ]/g, 'oe')
+    .replace(/[ß]/g, 'ss');
+}
+
 function _stripNoise(t) {
-  return t
+  if (!t) return '';
+  return _stripDiacritics(t)
     .replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ')
     .replace(/\b(live|stream|streaming|free|hd|fhd|4k|hq|web|online|tv|match|fixture|round|week|day|game|league|cup|tournament|season|fc|cf|sc|cd|ca|afc|fk|sk|bk|rsc|vfb|tsv)\b/gi, ' ');
 }
@@ -152,6 +172,7 @@ function _tokenize(t) {
 function _teamsSimilar(a, b) {
   if (!a || !b) return false;
   if (a === b) return true;
+  if (a.replace(/\s+/g, '') === b.replace(/\s+/g, '')) return true;
   const at = a.split(' ').filter(w => w.length > 2);
   const bt = b.split(' ').filter(w => w.length > 2);
   if (at.length === 0 || bt.length === 0) return false;
@@ -453,6 +474,7 @@ class MatchAggregator {
         // Carry a live score across the merge the same way artwork is carried.
         // A later provider that reports a score wins over an earlier blank.
         if (!existing.score && match.score) existing.score = match.score;
+        if (!existing.date && match.date) existing.date = match.date;
         if (!existing.background && match.background) existing.background = match.background;
         if (!existing.league && match.league) existing.league = match.league;
         if (!existing.team1 && match.team1) existing.team1 = match.team1;

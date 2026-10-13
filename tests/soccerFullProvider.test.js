@@ -55,15 +55,18 @@ describe('SoccerFullProvider', () => {
       expect(m1.league).toBe('Premier League');
       expect(m1.status).toBe('finished');
       expect(m1.thumbnail_url).toBe('https://soccerfull.net/imgs/4468.png');
+      expect(m1.poster).toBe('');
       expect(m1.sources).toHaveLength(1);
       expect(m1.sources[0].source).toBe('soccerfull');
       expect(m1.sources[0].id).toBe('/coventry-city-vs-newcastle-united-4468.html');
       expect(m1.sources[0].url).toBe('https://soccerfull.net/coventry-city-vs-newcastle-united-4468.html');
     });
 
-    test('parses date from URL slug if available and anchors past date otherwise', () => {
+    test('parses date from URL slug if available and leaves empty for clean upstream fixture merge', () => {
       const matches = provider._parseMatchCards(sampleHtml, 0);
+      const m1 = matches[0];
       const m2 = matches[1];
+      expect(m1.date).toBe('');
       const parsedKo = Number(m2.date);
       expect(parsedKo).toBeGreaterThan(0);
       expect(parsedKo).toBeLessThanOrEqual(Date.now());
@@ -228,5 +231,44 @@ describe('SoccerFullProvider', () => {
 
       expect(isReplayMatch(match)).toBe(true);
     });
+
+    test('merges seamlessly with existing ReplayZone fixture and preserves default artwork', () => {
+      const aggregator = container.resolve('matchAggregator');
+      const rzMatch = {
+        id: 'rz_coventry-city-vs-newcastle-united-12-10-2026',
+        title: 'Coventry City - Newcastle United',
+        category: 'football',
+        league: 'Premier League',
+        date: '2026-10-12T19:00:00+07:00',
+        status: 'finished',
+        poster: '',
+        thumbnail_url: 'https://soccerfull.net/imgs/4468.png',
+        sources: [{ source: 'replayzone', id: 'https://soccerfull.net/play/16483', name: 'Part 1' }]
+      };
+
+      const parsedMatches = provider._parseMatchCards(`
+        <li class="item-movie">
+          <a href="/coventry-city-vs-newcastle-united-4468.html" title="Coventry City vs Newcastle United">
+            <div class="image">
+              <img class="movie-thumbnail" src="/imgs/4468.png">
+            </div>
+            <div class="title-movie"><h3>Coventry City vs Newcastle United</h3></div>
+            <span class="code Premier League">Premier League</span>
+          </a>
+        </li>
+      `, 0);
+
+      expect(parsedMatches).toHaveLength(1);
+      const sfMatch = parsedMatches[0];
+
+      // 1. Poster normalized to empty string
+      expect(sfMatch.poster).toBe('');
+      // 2. Date unanchored
+      expect(sfMatch.date).toBe('');
+
+      // 3. MatchAggregator recognizes as same event
+      expect(aggregator.isSameEvent(rzMatch, sfMatch)).toBe(true);
+    });
   });
 });
+

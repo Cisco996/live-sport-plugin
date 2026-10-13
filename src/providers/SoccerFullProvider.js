@@ -125,14 +125,12 @@ class SoccerFullProvider extends BaseProvider {
         }
       }
 
-      // If no explicit date in slug, anchor in the past based on page index
-      // so it is immediately qualified as a finished replay (past kickoff)
-      if (!dateMs) {
-        const now = Date.now();
-        // Page 0: ~6 hours ago; Page 1: ~1.5 days ago; Page 2: ~3 days ago
-        const pastOffsetHours = 6 + (pageIndex * 36);
-        dateMs = now - (pastOffsetHours * 3600 * 1000);
-      }
+      // If no explicit date in slug, leave date empty (''):
+      // 1. Authoritative replay qualification is guaranteed by status: 'finished'.
+      // 2. Leaving date unanchored prevents MatchAggregator's 24h guard from
+      //    spuriously rejecting merges with real fixtures (ReplayZone, LiveTV, StreamedPk).
+      //    The merged event will automatically inherit the real kickoff timestamp.
+      const matchDate = dateMs ? String(dateMs) : '';
 
       // Extract numeric ID if present
       const idMatch = slug.match(/-(\d+)$/);
@@ -144,9 +142,9 @@ class SoccerFullProvider extends BaseProvider {
         category: 'football', // SoccerFull is 100% football replays
         league,
         status: 'finished', // Authoritative replay flag
-        date: String(dateMs),
+        date: matchDate,
         thumbnail_url: thumbnail,
-        poster: thumbnail,
+        poster: '', // Normalized: leave empty so catalog always renders default cinematic card
         background: thumbnail,
         sources: [{
           source: this.sourceName,
