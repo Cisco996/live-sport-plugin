@@ -563,23 +563,26 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       }
 
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
-      // If it doesn't contain #EXT, it's not a valid m3u8 playlist.
-      if (!bodySample.includes('#EXT')) {
+      // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
+      const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
+      if (!isMpd && !bodySample.includes('#EXT')) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
 
-      // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time
-      const parsedQuality = m3u8Parser.parseManifestText(bodySample);
-      if (parsedQuality) {
-        if (parsedQuality.qualityTag) s.quality = parsedQuality.qualityTag;
-        if (parsedQuality.resolution) s.resolution = parsedQuality.resolution;
-        if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
-      }
+      // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time (for HLS)
+      if (!isMpd) {
+        const parsedQuality = m3u8Parser.parseManifestText(bodySample);
+        if (parsedQuality) {
+          if (parsedQuality.qualityTag) s.quality = parsedQuality.qualityTag;
+          if (parsedQuality.resolution) s.resolution = parsedQuality.resolution;
+          if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
+        }
 
-      if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
-        await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
+        if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
+          await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
+        }
       }
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);

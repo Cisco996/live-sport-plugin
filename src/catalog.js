@@ -1449,6 +1449,41 @@ async function handleCatalogUncached(type, id, extra, config) {
       }
     }
   }
+
+  // ── Genre filter for 24/7 Live Networks (nuvio_sports_networks) ───────────
+  if (categoryMatch === 'networks' && extra && typeof extra.genre === 'string' && extra.genre.trim()) {
+    const rawGenre = extra.genre.trim();
+    const gLower = rawGenre.toLowerCase();
+
+    if (gLower !== 'all') {
+      filteredMatches = filteredMatches.filter(m => {
+        const title = (m.title || '').toLowerCase();
+        const league = (m.league || '').toLowerCase();
+        const combined = `${title} ${league}`;
+
+        if (gLower === 'sports channels') {
+          return /sport|espn|sky|fox|supersport|arena|willow|bein|tsn|optus|nbc|cbs|astro|tnt/i.test(combined);
+        } else if (gLower === 'sun nxt') {
+          return league.includes('sun nxt') || /\b(sun\s*(?:nxt|tv|music|news|life|bangla|marathi|neo)|ktv\s*(?:hd)?\b|gemini\s*(?:tv|music|movies)|surya\s*(?:tv|movies|comedy)|udaya\s*(?:tv|movies|music)|adithya|kushi\s*tv|chutti\s*tv)/i.test(title);
+        } else if (gLower === 'cricket') {
+          return league.includes('cricket') || /cricket|ipl|cric|willow|blues|icc|star\s*sports/i.test(combined);
+        } else if (gLower === 'reality') {
+          return league.includes('reality') || /big\s*boss|\bbbs\b|\bbb\b|reality/i.test(combined);
+        } else if (gLower === 'hindi') {
+          return league.includes('hindi') || /हिंदी|hindi/i.test(combined);
+        } else if (gLower === 'tamil & telugu' || gLower === 'tamil' || gLower === 'telugu') {
+          return /tamil|telugu|தமிழ்|తెలుగు/i.test(combined);
+        } else if (gLower === 'usa & uk' || gLower === 'usa' || gLower === 'uk') {
+          return /usa|uk|united states|united kingdom/i.test(combined);
+        } else if (gLower === 'pakistan tv' || gLower === 'pakistan') {
+          return /pakistan|ary|geo|ptv|hum/i.test(combined);
+        } else if (gLower === 'entertainment' || gLower === 'movies & entertainment') {
+          return /movie|entertainment|news|kids|show|kapil/i.test(combined);
+        }
+        return combined.includes(gLower);
+      });
+    }
+  }
   if (extra && extra.search) {
     const q = extra.search.toLowerCase();
     filteredMatches = filteredMatches.filter(m => 

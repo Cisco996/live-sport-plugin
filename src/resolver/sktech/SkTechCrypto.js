@@ -112,6 +112,55 @@ class SkTechCrypto {
     decrypted += decipher.final('utf8');
     return decrypted;
   }
+
+  /**
+   * Decrypt dynamic encrypted M3U playlists (e.g. BIG BOSS worker payloads)
+   * Reversed from Dalvik method `Lua/t1;->h`:
+   * - Head: substring(0, 10)
+   * - IV: substring(10, 34) (Base64 decode -> 16 bytes IV)
+   * - Body: substring(34, len - 54)
+   * - Key: substring(len - 54, len - 10) (Base64 decode -> 32 bytes AES-256 key)
+   * - Tail: substring(len - 10)
+   * - Ciphertext: Head + Body + Tail (Base64 decode -> AES-256-CBC cipher bytes)
+   *
+   * @param {string} rawText - Response text from worker endpoint
+   * @returns {string} Plaintext M3U or original string if not encrypted
+   */
+  decryptM3u(rawText) {
+    if (!rawText || typeof rawText !== 'string') return '';
+    const trimmed = rawText.trim();
+    if (trimmed.length < 60) return trimmed;
+
+    // Check if payload matches encrypted structure (IV ends with == at char 32-34)
+    if (!trimmed.substring(10, 34).includes('==')) {
+      return trimmed;
+    }
+
+    const len = trimmed.length;
+    const v2 = trimmed.substring(0, 10);
+    const v4_iv = trimmed.substring(10, 34);
+    const v3 = trimmed.substring(34, len - 54);
+    const v5_key = trimmed.substring(len - 54, len - 10);
+    const v7_tail = trimmed.substring(len - 10);
+
+    const cipherTextB64 = v2 + v3 + v7_tail;
+
+    try {
+      const iv = Buffer.from(v4_iv, 'base64');
+      const key = Buffer.from(v5_key, 'base64');
+      const cipherBytes = Buffer.from(cipherTextB64, 'base64');
+
+      if (iv.length !== 16 || (key.length !== 16 && key.length !== 32) || cipherBytes.length % 16 !== 0) {
+        return trimmed;
+      }
+
+      const algo = key.length === 32 ? 'aes-256-cbc' : 'aes-128-cbc';
+      const decipher = crypto.createDecipheriv(algo, key, iv);
+      return Buffer.concat([decipher.update(cipherBytes), decipher.final()]).toString('utf8');
+    } catch (_) {
+      return trimmed;
+    }
+  }
 }
 
 module.exports = new SkTechCrypto();

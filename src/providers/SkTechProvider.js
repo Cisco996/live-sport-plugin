@@ -78,17 +78,21 @@ class SkTechProvider extends BaseProvider {
           category: 'networks',
           date: '0',
           popular: '1',
-          league: 'Live TV',
+          league: ch.group || 'Live TV',
           poster: ch.logo || ch.poster || undefined,
           thumbnail_url: ch.logo || ch.poster || undefined,
           logo: ch.logo || undefined,
           sources: [{
             source: 'sktech',
-            id: ch.links || ch.api || ch.id,
+            id: ch.url || ch.links || ch.api || ch.id,
             channelName: ch.title,
             type: ch.type,
-            url: ch.api || '',
-            links: ch.links || ''
+            url: ch.url || ch.api || '',
+            links: ch.links || '',
+            headers: ch.headers || {},
+            drmScheme: ch.drmScheme,
+            drmLicense: ch.drmLicense,
+            group: ch.group
           }]
         }));
       }

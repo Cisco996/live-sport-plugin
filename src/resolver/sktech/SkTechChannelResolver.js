@@ -6,17 +6,24 @@ const SkTechMatchResolver = require('./SkTechMatchResolver');
 
 const BASE_API_URL = 'https://dk01-64n.pages.dev/';
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 class SkTechChannelResolver {
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || BASE_API_URL;
     this._customCache = new Map();
-    this._customCacheTime = 0;
+    this._customCacheTime = new Map();
+    this._m3uCache = new Map();
+    this._m3uCacheTime = new Map();
   }
 
   /**
    * Ingest and decrypt all 24/7 TV channels & categories from `categories.txt`
    * Maps everything cleanly under category 'networks' and kickoff '0'
+   * Unpacks multi-tier nested bouquets:
+   * - Custom multi-channel groups (SPORTS WORLD, Hindi, Tamil, Telugu, Pakistan, Movies, News)
+   * - Encrypted dynamic M3U playlists (BIG BOSS -> Cricket + Reality)
+   * - Multi-channel M3U bouquets (SUN NXT with ClearKey, CRIC HD, USA/UK TV)
    *
    * @returns {Promise<Array<Object>>} Normalized 24/7 channel items
    */
@@ -25,7 +32,8 @@ class SkTechChannelResolver {
     try {
       const url = `${this.baseUrl}categories.txt`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': DEFAULT_UA }
+        headers: { 'User-Agent': DEFAULT_UA },
+        signal: AbortSignal.timeout(6000)
       });
 
       if (!res.ok) return [];
@@ -49,15 +57,21 @@ class SkTechChannelResolver {
       const type = item.type || 'm3u';
       const api = item.api || '';
 
-      // Sub-type A: Custom channel group (e.g. channels/<id>.txt)
+      // ────────────────────────────────────────────────────────────────────────
+      // Tier 1: Custom channel group definitions (channels/<id>.txt)
+      // ────────────────────────────────────────────────────────────────────────
       if (type === 'custom' && api) {
-        // Expand high-value sports channels (SPORTS WORLD, WWE RAW, SmackDown, etc.)
-        const isPriorityGroup = api.includes('U1BPUlRTIFdPUkxE') ||
-          /sport|raw|smackdown/i.test(name);
+        const isSportsGroup = /sport|raw|smackdown|wwe/i.test(name) || api.includes('U1BPUlRTIFdPUkxE');
+        const isRegionalGroup = /hindi|हिंदी|tamil|தமிழ்|telugu|తెలుగు|punjabi|ਪੰਜਾਬੀ|bangla|বাংলা|bhojpuri|भोजपुरी|odia|ଓଡ଼ିଆ|pakistan/i.test(name);
+        const isEntertainmentGroup = /movie|kids|news|kapil/i.test(name);
 
-        if (isPriorityGroup) {
+        if (isSportsGroup || isRegionalGroup || isEntertainmentGroup) {
           try {
             const subChannels = await this.fetchCustomChannelGroup(api);
+            const groupTag = isSportsGroup
+              ? 'Sports Channels'
+              : (isRegionalGroup ? name : 'Entertainment');
+
             for (let j = 0; j < subChannels.length; j++) {
               const sub = subChannels[j];
               channels.push({
@@ -69,7 +83,7 @@ class SkTechChannelResolver {
                 logo: sub.logo || logo,
                 poster: sub.logo || logo,
                 links: sub.links,
-                group: name
+                group: groupTag
               });
             }
             continue;
@@ -85,21 +99,203 @@ class SkTechChannelResolver {
           type: 'custom',
           logo,
           poster: logo,
-          api
+          api,
+          group: 'Live TV'
         });
       }
-      // Sub-type B: Direct M3U stream entry
+      // ────────────────────────────────────────────────────────────────────────
+      // Tier 2: M3U Playlists (Direct feeds, multi-channel bouquets, encrypted workers)
+      // ────────────────────────────────────────────────────────────────────────
       else if (type === 'm3u' && api) {
+        const isBigBoss = /boss/i.test(name) || api.includes('[rts]') || api.includes('alpha-circuit.workers.dev');
+        const isSunNxt = /sun\s*nxt/i.test(name) || api.includes('sunxt.m3u');
+        const isCricHd = /cric\s*hd/i.test(name) || api.includes('CricketLive');
+        const isUsaUk = /usa\s*live|usa\s*tv|uk\s*tv|prime\s*usa/i.test(name);
+
+        if (isBigBoss || isSunNxt || isCricHd || isUsaUk) {
+          try {
+            const defaultGroup = isSunNxt ? 'Sun NXT' : (isCricHd ? 'Cricket' : (isUsaUk ? 'USA & UK' : 'Big Boss'));
+            const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
+
+            for (let j = 0; j < subChannels.length; j++) {
+              const sub = subChannels[j];
+              channels.push({
+                id: `sktech_ch_m3u_${i}_${j}`,
+                title: sub.title,
+                category: 'networks',
+                kickoff: 0,
+                type: 'direct_m3u',
+                logo: sub.logo || logo,
+                poster: sub.logo || logo,
+                url: sub.url,
+                headers: sub.headers,
+                drmScheme: sub.drmScheme,
+                drmLicense: sub.drmLicense,
+                group: sub.group || defaultGroup
+              });
+            }
+            continue;
+          } catch (_) {}
+        }
+
+        // Generic single M3U stream entry fallback
         channels.push({
           id: `sktech_ch_m3u_${i}`,
           title: name,
-          category: 'networks', // 24/7 live network
-          kickoff: 0,           // signals continuous stream in Nuvio catalog
+          category: 'networks',
+          kickoff: 0,
           type: 'm3u',
           logo,
           poster: logo,
-          api
+          api,
+          group: 'Live TV'
         });
+      }
+    }
+
+    return channels;
+  }
+
+  /**
+   * Resolves and parses a multi-channel M3U playlist with 5-minute in-memory caching
+   * Automatically decrypts encrypted worker responses (like BIG BOSS / [rts])
+   *
+   * @param {string} rawApi - M3U URL with possible pipe delimiter or worker token
+   * @param {string} defaultGroup - Fallback group title
+   * @returns {Promise<Array<Object>>} Constituent channel objects
+   */
+  async fetchM3uBouquet(rawApi, defaultGroup = 'Live TV') {
+    if (!rawApi) return [];
+
+    const now = Date.now();
+    const lastTime = this._m3uCacheTime.get(rawApi) || 0;
+    if (this._m3uCache.has(rawApi) && now - lastTime < CACHE_TTL_MS) {
+      return this._m3uCache.get(rawApi);
+    }
+
+    const parsed = SkTechEmbedExtractor.parseDelimited(rawApi);
+    if (!parsed.url) return [];
+
+    try {
+      const res = await fetch(parsed.url, {
+        headers: {
+          'User-Agent': parsed.headers['User-Agent'] || DEFAULT_UA,
+          'Accept': '*/*',
+          ...parsed.headers
+        },
+        signal: AbortSignal.timeout(8000)
+      });
+
+      if (!res.ok) return [];
+
+      const rawText = (await res.text()).trim();
+      // If response is encrypted (like BIG BOSS), decrypt via reversed Dalvik algorithm
+      const m3uContent = SkTechCrypto.decryptM3u(rawText);
+
+      const items = this.parseM3uBouquet(m3uContent, defaultGroup, parsed.headers);
+      this._m3uCache.set(rawApi, items);
+      this._m3uCacheTime.set(rawApi, now);
+      return items;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * Parses an M3U playlist into discrete channel objects
+   * Fully supports EXTINF tags, group-title, tvg-logo, #KODIPROP clearkey, and EXTVLCOPT headers
+   *
+   * @param {string} m3uText
+   * @param {string} defaultGroup
+   * @param {Object} defaultHeaders
+   * @returns {Array<Object>}
+   */
+  parseM3uBouquet(m3uText, defaultGroup = 'Live TV', defaultHeaders = {}) {
+    if (!m3uText || typeof m3uText !== 'string') return [];
+
+    const channels = [];
+    const lines = m3uText.split(/\r?\n/);
+
+    let currentTitle = '';
+    let currentLogo = '';
+    let currentGroup = defaultGroup;
+    let currentLang = '';
+    let currentDrmScheme = null;
+    let currentDrmLicense = null;
+    let currentHeaders = { ...defaultHeaders };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      if (line.startsWith('#EXTINF:')) {
+        // Extract channel title after last comma
+        const commaIdx = line.indexOf(',');
+        if (commaIdx !== -1) {
+          currentTitle = line.slice(commaIdx + 1).trim();
+        }
+
+        // Extract group-title="..."
+        const groupMatch = line.match(/group-title="([^"]+)"/i);
+        if (groupMatch && groupMatch[1].trim()) {
+          currentGroup = groupMatch[1].trim();
+        }
+
+        // Extract tvg-logo="..."
+        const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+        if (logoMatch && logoMatch[1].trim()) {
+          currentLogo = logoMatch[1].trim();
+        }
+
+        // Extract tvg-language="..."
+        const langMatch = line.match(/tvg-language="([^"]+)"/i);
+        if (langMatch && langMatch[1].trim()) {
+          currentLang = langMatch[1].trim();
+        }
+      } else if (line.startsWith('#KODIPROP:inputstream.adaptive.license_type=')) {
+        const val = line.split('=')[1].trim().toLowerCase();
+        if (val.includes('clearkey')) currentDrmScheme = 'clearkey';
+        else if (val.includes('widevine')) currentDrmScheme = 'widevine';
+      } else if (line.startsWith('#KODIPROP:inputstream.adaptive.license_key=')) {
+        currentDrmLicense = line.split('=')[1].trim();
+      } else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
+        currentHeaders['User-Agent'] = line.split('=')[1].trim();
+      } else if (line.startsWith('#EXTVLCOPT:http-referer=') || line.startsWith('#EXTVLCOPT:http-referrer=')) {
+        currentHeaders['Referer'] = line.split('=')[1].trim();
+      } else if (line.startsWith('#EXTVLCOPT:http-origin=')) {
+        currentHeaders['Origin'] = line.split('=')[1].trim();
+      } else if (line.startsWith('#EXTHTTP:')) {
+        try {
+          const rawJson = line.slice(9).trim();
+          const parsed = JSON.parse(rawJson);
+          Object.assign(currentHeaders, parsed);
+        } catch (_) {}
+      } else if (line.startsWith('http://') || line.startsWith('https://')) {
+        const parsed = SkTechEmbedExtractor.parseDelimited(line);
+        const streamUrl = parsed.url;
+        const mergedHeaders = { ...currentHeaders, ...parsed.headers };
+
+        if (streamUrl) {
+          channels.push({
+            title: currentTitle || `Channel ${channels.length + 1}`,
+            logo: currentLogo,
+            group: currentGroup,
+            language: currentLang,
+            url: streamUrl,
+            headers: mergedHeaders,
+            drmScheme: currentDrmScheme || parsed.drmScheme,
+            drmLicense: currentDrmLicense || parsed.drmLicense
+          });
+        }
+
+        // Reset per-channel state
+        currentTitle = '';
+        currentLogo = '';
+        currentGroup = defaultGroup;
+        currentLang = '';
+        currentDrmScheme = null;
+        currentDrmLicense = null;
+        currentHeaders = { ...defaultHeaders };
       }
     }
 
@@ -116,14 +312,18 @@ class SkTechChannelResolver {
     if (!customApiPath) return [];
 
     const now = Date.now();
-    if (this._customCache.has(customApiPath) && now - this._customCacheTime < 300000) {
+    const lastTime = this._customCacheTime.get(customApiPath) || 0;
+    if (this._customCache.has(customApiPath) && now - lastTime < CACHE_TTL_MS) {
       return this._customCache.get(customApiPath);
     }
 
     const url = customApiPath.startsWith('http') ? customApiPath : `${this.baseUrl}${customApiPath}`;
 
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA } });
+      const res = await fetch(url, {
+        headers: { 'User-Agent': DEFAULT_UA },
+        signal: AbortSignal.timeout(6000)
+      });
       if (!res.ok) return [];
 
       const rawCiphertext = (await res.text()).trim();
@@ -146,7 +346,7 @@ class SkTechChannelResolver {
       }
 
       this._customCache.set(customApiPath, subChannels);
-      this._customCacheTime = now;
+      this._customCacheTime.set(customApiPath, now);
       return subChannels;
     } catch (_) {
       return [];
@@ -162,6 +362,38 @@ class SkTechChannelResolver {
    */
   async resolveChannelStream(channel) {
     if (!channel) return [];
+
+    // Case 0: Pre-unpacked channel from M3U bouquet (e.g. Big Boss, Sun NXT, CricHD)
+    if (channel.url && channel.type === 'direct_m3u') {
+      const parsed = SkTechEmbedExtractor.parseDelimited(channel.url);
+      const streamHeaders = Object.keys(channel.headers || {}).length > 0 ? channel.headers : parsed.headers;
+
+      let clearkeyObj = undefined;
+      if (channel.drmScheme === 'clearkey' && channel.drmLicense) {
+        if (channel.drmLicense.includes(':')) {
+          const [keyId, key] = channel.drmLicense.split(':');
+          clearkeyObj = { keyId, key };
+        } else {
+          try {
+            clearkeyObj = JSON.parse(channel.drmLicense);
+          } catch (_) {}
+        }
+      }
+
+      return [{
+        name: '⚡ Direct Stream',
+        title: `SK Tech | ${channel.title}${channel.group ? ' (' + channel.group + ')' : ''}`,
+        url: parsed.url || channel.url,
+        behaviorHints: {
+          notWebReady: true,
+          proxyHeaders: {
+            request: streamHeaders
+          }
+        },
+        clearkey: clearkeyObj,
+        score: 95
+      }];
+    }
 
     // Case 1: Custom channel item with link definition (`pro/<id>.txt`)
     const linkPath = channel.links || (channel.type === 'pro' ? channel.api : '');
@@ -192,33 +424,22 @@ class SkTechChannelResolver {
           });
           if (res.ok) {
             const m3uText = await res.text();
-            const lines = m3uText.split(/\r?\n/);
+            const channels = this.parseM3uBouquet(m3uText, channel.title, parsed.headers);
             const streams = [];
-            let currentTitle = '';
 
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('#EXTINF:')) {
-                const commaIdx = line.indexOf(',');
-                currentTitle = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '';
-              } else if (line.startsWith('http')) {
-                const streamParsed = SkTechEmbedExtractor.parseDelimited(line);
-                if (streamParsed.url) {
-                  streams.push({
-                    name: '⚡ Direct Stream',
-                    title: `SK Tech | ${currentTitle || channel.title}`,
-                    url: streamParsed.url,
-                    behaviorHints: {
-                      notWebReady: true,
-                      proxyHeaders: {
-                        request: Object.keys(streamParsed.headers).length > 0 ? streamParsed.headers : parsed.headers
-                      }
-                    },
-                    score: 90
-                  });
-                }
-                currentTitle = '';
-              }
+            for (const ch of channels) {
+              streams.push({
+                name: '⚡ Direct Stream',
+                title: `SK Tech | ${ch.title}`,
+                url: ch.url,
+                behaviorHints: {
+                  notWebReady: true,
+                  proxyHeaders: {
+                    request: ch.headers
+                  }
+                },
+                score: 90
+              });
             }
 
             if (streams.length > 0) {
