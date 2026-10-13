@@ -181,8 +181,8 @@ function _tryExtractTeams(title) {
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider }) {
-    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : [])];
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider }) {
+    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
@@ -502,17 +502,17 @@ class MatchAggregator {
     let anyProviderSucceeded = false;
 
     // ── 12-Hour Replay Cadence ──────────────────────────────────────────────
-    // Replay events (ReplayZone & LiveTV 21-day archives) are static past fixtures.
-    // Re-scraping 21 days of Russian mirrors and archive pages on every server restart
+    // Replay events (ReplayZone, LiveTV & SoccerFull archives) are static past fixtures.
+    // Re-scraping mirrors and archive pages on every server restart
     // or sync burns significant CPU, network, and RAM. Reuse cached replays if they
     // were synced within the last 12 hours.
-    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv']);
+    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull']);
     const REPLAY_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
     const previous = (this.cacheService && typeof this.cacheService.getMatches === 'function')
       ? this.cacheService.getMatches()
       : [];
-    const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv'));
+    const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull'));
 
     if (this.lastReplaySync === undefined && this.cacheService && this.cacheService.lastFetchTime) {
       this.lastReplaySync = this.cacheService.lastFetchTime;
@@ -610,7 +610,7 @@ class MatchAggregator {
       // retention window instead of an open-ended exemption.
       const expiryWindowMs = 24 * 3600 * 1000;
       const replayExpiryWindowMs = REPLAY_RETENTION_DAYS * 24 * 3600 * 1000;
-      const isReplayZone = match.sources && match.sources.some(s => s.source === 'replayzone' || s.source === 'livetv');
+      const isReplayZone = match.sources && match.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull');
       const windowMs = isReplayZone ? replayExpiryWindowMs : expiryWindowMs;
       return now <= kickoff + windowMs;
     });

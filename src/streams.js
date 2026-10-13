@@ -24,11 +24,11 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 1, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 1, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
-    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'livetv', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
+    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'livetv', 'soccerfull', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
     const pa = getPriority(a.source);
     const pb = getPriority(b.source);
     if (pa !== pb) return pa - pb;
@@ -39,7 +39,7 @@ function selectSources(matchSources, config) {
     const enabled = config.sources.split(',');
     // embedindia / embedst / streamedpk are the same embed chain — all three are
     // controlled by the single 'streamedpk' toggle on the configure page.
-    const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
+    const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -51,7 +51,7 @@ function selectSources(matchSources, config) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
+  const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -98,6 +98,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'ppvst') {
     const provider = container.resolve('ppvStProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'soccerfull') {
+    const provider = container.resolve('soccerFullProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -820,7 +823,8 @@ async function handleStream(type, id, config) {
     'replayzone': 'ReplayZone',
     'livetv': 'LiveTV',
     'damitv': 'DamiTV',
-    'ppvst': 'PPV.st'
+    'ppvst': 'PPV.st',
+    'soccerfull': 'SoccerFull'
   };
 
   streams.forEach(s => {
