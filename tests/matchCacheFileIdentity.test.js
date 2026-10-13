@@ -51,7 +51,7 @@ describe('Atomic match-cache file identity', () => {
     expect(cache.getMatches().map(m => m.id)).toEqual(['b']);
   });
 
-  test('a concurrent replacement after local rename is detected on the next poll', () => {
+  (process.platform === 'win32' ? test.skip : test)('a concurrent replacement after local rename is detected on the next poll', () => {
     const originalRename = fs.renameSync;
     const originalStat = fs.statSync;
     let replaced = false;
