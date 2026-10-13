@@ -353,5 +353,27 @@ https://cdn.example.com/sony1.m3u8|User-Agent=ExoPlayer
       const skTechInstance = aggregator.providers.find(p => p.name === 'SkTech');
       expect(skTechInstance).toBeDefined();
     });
+
+    test('merges diacritic-heavy international fixtures into single poster (e.g. Cong An Hanoi vs Kashima Antlers)', () => {
+      const aggregator = container.resolve('matchAggregator');
+      const now = Date.now();
+      const m1 = new MatchEntity({
+        id: 'dlv_103_cong-an-hanoi-vs-kashima-antlers',
+        title: 'Cong An Hanoi vs Kashima Antlers',
+        category: 'football',
+        date: String(now),
+        sources: [{ source: 'daddylive', id: '103' }]
+      });
+      const m2 = new MatchEntity({
+        id: 'sktech_match_31_kashima',
+        title: 'Cơng An Hà Nội vs Kashima Antlers',
+        category: 'football',
+        date: String(now),
+        sources: [{ source: 'sktech', id: 'pro/kashima.txt' }]
+      });
+
+      const isSame = aggregator.isSameEvent(m1, m2);
+      expect(isSame).toBe(true);
+    });
   });
 });
