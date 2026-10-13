@@ -827,7 +827,8 @@ async function handleStream(type, id, config) {
     'livetv': 'LiveTV',
     'damitv': 'DamiTV',
     'ppvst': 'PPV.st',
-    'soccerfull': 'SoccerFull'
+    'soccerfull': 'SoccerFull',
+    'sktech': 'SKTech'
   };
 
   streams.forEach(s => {
@@ -868,6 +869,7 @@ async function handleStream(type, id, config) {
     else if (s.title && s.title.toLowerCase().includes('watchfooty')) providerName = 'WatchFooty';
     else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
     else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
+    else if (s._source === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
 
     let originalTitle = s.title || '';
     let channelName = '';

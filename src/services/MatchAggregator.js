@@ -467,9 +467,9 @@ class MatchAggregator {
           });
         }
         if (match.popular === '1') existing.popular = '1';
-        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st')) existing.poster = match.poster;
-        if (!existing.logo && match.logo && !match.logo.includes('ppvservices.st')) existing.logo = match.logo;
-        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st')) existing.thumbnail_url = match.thumbnail_url;
+        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st') && !match.poster.includes('unique-tournament')) existing.poster = match.poster;
+        if (!existing.logo && match.logo && !match.logo.includes('ppvservices.st') && !match.logo.includes('unique-tournament')) existing.logo = match.logo;
+        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st') && !match.thumbnail_url.includes('unique-tournament')) existing.thumbnail_url = match.thumbnail_url;
         if (existing.category === 'networks' || match.category === 'networks') existing.poster = '';
         // Carry a live score across the merge the same way artwork is carried.
         // A later provider that reports a score wins over an earlier blank.

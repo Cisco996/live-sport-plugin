@@ -667,7 +667,8 @@ app.get('/img', async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
   const entry = await imageService.getImage(req.query.url);
-  if (entry) {
+  const isValidEntry = entry && (entry.width == null || entry.width > 2) && (entry.height == null || entry.height > 2) && entry.buffer && entry.buffer.length > 100;
+  if (isValidEntry) {
     res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600');
     if (embed && !entry.contentType.includes('svg')) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';

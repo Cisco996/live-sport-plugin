@@ -171,7 +171,7 @@ class SkTechMatchResolver {
       if (parsed.url.includes('.r2.dev')) {
         r2Streams.push({
           name: '⚡ Direct Stream',
-          title: `SK Tech | ${serverName} (CDN R2)`,
+          title: `SK Tech (${serverName ? `${serverName} • R2` : 'R2 Fast'})`,
           url: parsed.url,
           behaviorHints: {
             notWebReady: true,
@@ -186,7 +186,7 @@ class SkTechMatchResolver {
       else if (parsed.url.includes('.mpd') || api.includes(':')) {
         const streamObj = {
           name: '⚡ Direct Stream',
-          title: `SK Tech | ${serverName} (DASH ClearKey)`,
+          title: `SK Tech (${serverName ? `${serverName} • DASH` : 'DASH ClearKey'})`,
           url: parsed.url,
           behaviorHints: {
             notWebReady: true,
@@ -205,7 +205,7 @@ class SkTechMatchResolver {
       else if (parsed.url.includes('.m3u8') || parsed.url.includes('amagi.tv') || parsed.url.includes('redbull.tv')) {
         hlsStreams.push({
           name: '⚡ Direct Stream',
-          title: `SK Tech | ${serverName} (HLS Direct)`,
+          title: `SK Tech (${serverName || 'HLS Server'})`,
           url: parsed.url,
           behaviorHints: {
             notWebReady: true,
@@ -220,7 +220,7 @@ class SkTechMatchResolver {
       else {
         hlsStreams.push({
           name: '⚡ Direct Stream',
-          title: `SK Tech | ${serverName}`,
+          title: `SK Tech (${serverName || 'Live Server'})`,
           url: parsed.url,
           behaviorHints: {
             notWebReady: true,
