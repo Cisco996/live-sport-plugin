@@ -19,7 +19,7 @@
 > 🛡️ **OFFICIAL NOTICE ON THIRD-PARTY FORKS & PAID SERVICES:**
 > - **100% Free & Open-Source:** This project is, and will always remain, completely free and open-source under the MIT license. **There are NO paid subscriptions, NO device limits, and NO license keys.**
 > - **Unauthorized Monetization:** If any third-party fork, website, or instance claims to be this addon while selling "premium access", "license keys", or monthly subscriptions (e.g., via PayPal or crypto), **they are NOT affiliated with, supported by, or endorsed by this project**.
-> - **Content Scope:** This addon exclusively indexes public live sports fixtures. The official repository does not distribute or endorse adult content, shock media, or paid pirated IPTV bundles.
+> - **Content Scope:** This addon exclusively indexes public live sports fixtures and replays. The official repository does not distribute or endorse adult content, shock media, or paid pirated IPTV bundles.
 > - **Official Support:** The only official repository is [github.com/rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin). Voluntary community support is solely via [Ko-fi](https://ko-fi.com/rajodedara).
 
 > ☕ **Enjoying Nuvio Live Sports?** Help keep the public instance alive and cover server maintenance!
@@ -28,7 +28,7 @@
 > - **Solana (SOL):** `CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU`
 > - **Bitcoin (BTC):** `bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u`
 
-A production-grade live sports streaming add-on for [Nuvio](https://nuvio.tv) and [Stremio](https://www.stremio.com/). It serves as a high-throughput multi-source aggregator providing native live sports streams (Football, Basketball, Motorsport, Cricket, MMA, NFL, Tennis, and more) along with match replays and 24/7 channels directly inside your player, backed by an advanced internal stream resolver to bypass CORS and ISP restrictions.
+A production-grade live sports streaming add-on for [Nuvio](https://nuvio.tv) and [Stremio](https://www.stremio.com/). It serves as a high-throughput multi-source aggregator providing native live sports streams (Football, Basketball, Motorsport, Cricket, MMA, NFL, Tennis, and more) along with full match replays and 24/7 channels directly inside your player, backed by an advanced internal stream resolver to bypass CORS and ISP restrictions.
 
 ---
 
@@ -115,26 +115,37 @@ npx pm2 save
 npx pm2 startup
 ```
 
-For complete production deployment instructions including Caddy reverse proxy, TLS, firewall hardening, and Cloudflare edge proxy setup, read the [Deployment Guide](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/DEPLOYMENT_GUIDE.md).
-
 ---
 
-## ⚡ Algorithmic Performance & Benchmarks
+## ⏪ Full Match Replays & Catch-Up Hubs
 
-The v3.1 engine has been engineered for extreme throughput, sub-millisecond response latency, and zero heap allocation churn on read paths:
+Never miss a game with native **Full Match Replays and Highlights** built directly into Nuvio and Stremio. Replays are organized into dynamic rolling relative date rows that calculate date ranges in real time when you open the app—eliminating stale hardcoded dates or the need to re-import JSON catalogs.
 
-| Subsystem | Before Optimization | After Optimization | Measured Speedup / Impact |
-|:---|:---|:---|:---|
-| **Catalog Sorting** | Pairwise regex scans: $O(N \log N \cdot K_{\text{regex}})$ (690 ms on 3k items) | Schwartzian transform with numeric precomputed keys: $O(N \cdot K + N \log N)$ (75 ms) | **89.1% faster CPU response** |
-| **Stream Match Resolution** | Up to 4 consecutive linear scans: $O(N)$ (4,064 ms per 3k lookups) | Multi-index Hash Maps (`_byId`, `_byAlias`, `_bySourceId`): $O(1)$ (144 ms per 3k lookups) | **28.2x faster lookup throughput** |
-| **Database Reads** | Deep-cloning ~24,000 objects per read request (251 ms for 100 reads) | Direct reference via `getMatchesReadOnly()`: $O(1)$ (0.15 ms for 100 reads) | **99.9% faster, zero GC heap allocation** |
-| **Aggregator Match Merging** | Full cross-provider linear scan: 1,500,000 comparisons (15.0 ms) | Category-bucketed partitioned lookups: 187,500 comparisons (5.0 ms) | **87.5% fewer iterations** |
-| **Country Resolution** | Repeated regular expression evaluations on channel names (19.4 ms) | Memoized $O(1)$ country cache (0.73 ms per 5k lookups) | **26.6x faster resolution** |
-| **LRU Cache Eviction** | Array sorting eviction: $O(E \log E)$ (7.95 ms) | Native JavaScript Map insertion-order cursor eviction: $O(1)$ (0.14 ms) | **55.3x faster cache cycle** |
-| **Queue Consumption** | Array shifting: $O(K^2)$ `Array.shift()` (0.10 ms) | In-place cursor pointer index iteration: $O(K)$ (0.029 ms) | **3.5x faster throughput** |
-| **XOR Early-Exit** | Full buffer decoding: 448,000 elements scanned (131.3 ms) | Targeted byte header early validation (0.31 ms) | **415.7x faster token unpack** |
-| **Manifest Catalog Filtering** | Nested scans across 30 catalogs $\times$ 4,000 matches (2.50 ms) | Pre-extracted title lookup maps: $O(N + C)$ (0.50 ms) | **5.0x faster manifest builds** |
-| **Channel Logo Resolution** | Repeated array linear searches across TV guides (4.84 ms) | Bounded memoized lookup cache (2.17 ms per 5k lookups) | **2.2x faster logo resolution** |
+### 📅 Dynamic Rolling Relative Date Rows
+Catalogs automatically adapt based on current time:
+- 📅 **Today's Replays / Races / Matches** — Newly concluded fixtures from today.
+- 📅 **Yesterday's Replays** — Full games and events from yesterday.
+- 📅 **This Week's Replays** — Matches played over the last 2 to 7 days.
+- 📅 **Older Replays** — Past games older than 7 days.
+- 🏆 **All Sport Replays** — Complete historical replay archive for each sport category.
+
+### 🏆 Supported Replay Categories & Leagues
+- ⚽ **Football / Soccer:**
+  - 🏴󠁧󠁢󠁥󠁮󠁧󠁿 **Premier League Replays**
+  - ⭐ **UEFA Champions League & Europa League**
+  - 🌍 **La Liga, Serie A, Bundesliga, Ligue 1, and International Tournaments**
+- 🏎️ **Motorsport:**
+  - 🏎️ **Formula 1 (F1) Grand Prix Replays** (Full Practice, Qualifying & Race sessions)
+  - 🏁 **MotoGP, IndyCar, and NASCAR**
+- ⚾ **Baseball:**
+  - ⚾ **MLB (Major League Baseball) Replays & Full Games**
+- 🏉 **Rugby:**
+  - 🏉 **International Tests, Six Nations, Premiership Rugby, Super Rugby**
+
+### ⚡ Seamless Playback & Multi-Part Coverage
+- **Direct Playable TV Items:** Every replay is mapped directly as a playable video item—no fake TV show seasons, episodes, or multiple nested menus.
+- **Multi-Part & Highlights Options:** Choose between full unbroken match streams, split 1st Half / 2nd Half coverage, and condensed highlight packages.
+- **Nuvio Native Collections:** Built-in `/collections.json` endpoint powers horizontal landscape row browsing out-of-the-box.
 
 ---
 
@@ -143,7 +154,6 @@ The v3.1 engine has been engineered for extreme throughput, sub-millisecond resp
 - **🏟️ Multi-Source Live Aggregator:** Concurrently scrapes and unifies live fixtures from 13+ scrapers (DaddyLive, Streamed.pk, StreamFree, WatchFooty, SportyHunter, TimStreams, StreamSports99, Streamic, CDNLiveTV, DamiTV, EmbedIndia, PpvSt, ReplayZone) into a deduplicated catalog with merged stream choices.
 - **⚡ Coalescing Zero-Lag HLS Manifest Proxy (`/api/manifest`):** High-speed HLS proxy powered by `impit` with persistent keep-alive connections. Coalesces concurrent in-flight upstream requests (`manifestInFlight`) to eliminate duplicate fetches during live player segment polls and prevent ISP/upstream throttling.
 - **🔐 Native WebAssembly (WASM) Decryption:** Executes native WebAssembly binaries (`stream-lock.wasm`, `gasm.wasm`, `gasm_india.wasm`) directly in Node.js to decrypt obfuscated tokens and unlock protected third-party stream endpoints with zero headless browser overhead.
-- **📅 Rolling Relative Date Rows for Replays:** Dynamic rolling relative date rows (`Today's Replays`, `Yesterday's Replays`, `This Week's Replays`, `Older Replays`, and league-specific hubs) for Football, Motorsport, Baseball, and Rugby without manual catalog imports.
 - **🌐 Universal Dynamic Host Routing:** Zero hardcoded local IPs. Automatically inspects incoming `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and `cf-visitor` headers to dynamically rewrite all manifests, streams, and asset URLs to match the client's gateway (local LAN, Cloudflare Tunnels, Ngrok, or custom domains).
 - **🛡️ Opossum Circuit Breakers & Negative Caching:** Every provider scraper is isolated via an Opossum circuit breaker to instantly trip on timeouts or failures. Dead upstreams are negatively cached for 15s so video players seamlessly fail over to alternate sources without freezing.
 - **🖼️ Resilient 100% 200 OK Image Pipeline (`/img`):** High-performance image proxy with LRU caching (`stale-while-revalidate`), protocol-relative normalization (`//`), and dynamic inline SVG fallback cards to ensure clients never encounter broken posters or missing team crests.
@@ -240,17 +250,6 @@ npm run bench
 # Run heap memory benchmark
 npm run bench:heap
 ```
-
----
-
-## 📚 Technical Documentation & Guides
-
-For deep architectural reviews and production runbooks, consult the documents in [`docs/`](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs):
-- 📘 [Production Deployment Guide](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/DEPLOYMENT_GUIDE.md): Infrastructure topology (Cloudflare $\rightarrow$ Caddy $\rightarrow$ PM2), DNS/TLS, and firewall configuration.
-- 📘 [Bandwidth and Caching Architecture](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/BANDWIDTH_AND_CACHING.md): Details on caching tiers, stale-while-revalidate, and manifest proxy coalescing.
-- 📘 [Pre-warm Cron Guide](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/PREWARM_CRON.md): Stream resolver pre-warming architecture.
-- 📘 [DaddyLive Iframe Rotation](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/DADDYLIVE_IFRAME_DOMAINS.md): Auto-healing domain rotation and token extraction mechanics.
-- 📘 [Time Complexity & Benchmark Report](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/time%20complexity%20improvement%20report.md): In-depth algorithmic audit and profiler traces.
 
 ---
 
