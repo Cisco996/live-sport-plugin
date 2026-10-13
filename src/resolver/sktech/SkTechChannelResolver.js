@@ -110,14 +110,25 @@ class SkTechChannelResolver {
         const isBigBoss = /boss/i.test(name) || api.includes('[rts]') || api.includes('alpha-circuit.workers.dev');
         const isSunNxt = /sun\s*nxt/i.test(name) || api.includes('sunxt.m3u');
         const isCricHd = /cric\s*hd/i.test(name) || api.includes('CricketLive');
-        const isUsaUk = /usa\s*live|usa\s*tv|uk\s*tv|prime\s*usa/i.test(name);
+        const isSportsBouquet = /sports\s*event|fc\s*live/i.test(name);
+        const isCountryBouquet = /uk\s*tv|canada\s*tv|spain\s*tv|mexico\s*tv|arabic\s*tv|nz&au|world\s*news/i.test(name);
+        const isUsa = /usa\s*live|usa\s*tv|prime\s*usa/i.test(name);
 
-        if (isBigBoss || isSunNxt || isCricHd || isUsaUk) {
+        if (isBigBoss || isSunNxt || isCricHd || isSportsBouquet || isCountryBouquet || isUsa) {
           try {
-            const defaultGroup = isSunNxt ? 'Sun NXT' : (isCricHd ? 'Cricket' : (isUsaUk ? 'USA & UK' : 'Big Boss'));
+            let defaultGroup = name;
+            if (isSunNxt) defaultGroup = 'Sun NXT';
+            else if (isCricHd) defaultGroup = 'Cricket';
+            else if (isSportsBouquet) defaultGroup = 'Sports Channels';
+            else if (isBigBoss) defaultGroup = 'Big Boss';
+            else if (isUsa) defaultGroup = 'USA TV';
+
             const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
 
-            for (let j = 0; j < subChannels.length; j++) {
+            // Limit massive playlists (e.g. 5,600+ USA channels) to top 300 to protect memory and responsiveness
+            const maxChannels = subChannels.length > 500 ? 500 : subChannels.length;
+
+            for (let j = 0; j < maxChannels; j++) {
               const sub = subChannels[j];
               channels.push({
                 id: `sktech_ch_m3u_${i}_${j}`,

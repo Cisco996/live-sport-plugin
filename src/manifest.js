@@ -25,7 +25,7 @@ const manifest = {
       { name: 'search', isRequired: false }
     ] },
     { type: 'tv', id: 'nuvio_sports_networks', name: '📺 24/7 Live TV', extra: [
-      { name: 'genre', options: ['Sports Channels', 'Sun NXT', 'Cricket', 'Reality', 'Hindi', 'Tamil & Telugu', 'USA & UK', 'Pakistan TV', 'Entertainment', 'All'], isRequired: false },
+      { name: 'genre', options: ['Sports Channels', 'Cricket', 'Sun NXT', 'Reality', 'Hindi', 'Tamil & Telugu', 'USA TV', 'UK TV', 'Canada TV', 'Pakistan TV', 'Arabic TV', 'Spain & Latam', 'World News', 'Entertainment', 'All'], isRequired: false },
       { name: 'search', isRequired: false },
       { name: 'skip', isRequired: false }
     ] },

@@ -1473,12 +1473,22 @@ async function handleCatalogUncached(type, id, extra, config) {
           return league.includes('hindi') || /हिंदी|hindi/i.test(combined);
         } else if (gLower === 'tamil & telugu' || gLower === 'tamil' || gLower === 'telugu') {
           return /tamil|telugu|தமிழ்|తెలుగు/i.test(combined);
-        } else if (gLower === 'usa & uk' || gLower === 'usa' || gLower === 'uk') {
-          return /usa|uk|united states|united kingdom/i.test(combined);
+        } else if (gLower === 'usa tv' || gLower === 'usa') {
+          return league.includes('usa') || /\b(usa|united states|us)\b/i.test(combined);
+        } else if (gLower === 'uk tv' || gLower === 'uk') {
+          return league.includes('uk') || /\b(uk|united kingdom|bbc|itv|sky)\b/i.test(combined);
+        } else if (gLower === 'canada tv' || gLower === 'canada') {
+          return league.includes('canada') || /\b(canada|cbc|ctv|tsn)\b/i.test(combined);
         } else if (gLower === 'pakistan tv' || gLower === 'pakistan') {
-          return /pakistan|ary|geo|ptv|hum/i.test(combined);
+          return league.includes('pakistan') || /\b(pakistan|ary|geo\s*(?:news|tv)|ptv|hum\s*tv)\b/i.test(combined);
+        } else if (gLower === 'arabic tv' || gLower === 'arabic') {
+          return league.includes('arabic') || /\b(arabic|arabiya|mbc|rotana|al jazeera)\b/i.test(combined);
+        } else if (gLower === 'spain & latam' || gLower === 'spain' || gLower === 'mexico') {
+          return league.includes('spain') || league.includes('mexico') || /\b(spain|mexico|telemundo|univision|tve)\b/i.test(combined);
+        } else if (gLower === 'world news' || gLower === 'news') {
+          return league.includes('news') || /\b(news|cnn|bbc news|al jazeera|sky news|fox news)\b/i.test(combined);
         } else if (gLower === 'entertainment' || gLower === 'movies & entertainment') {
-          return /movie|entertainment|news|kids|show|kapil/i.test(combined);
+          return /movie|entertainment|kids|show|kapil/i.test(combined);
         }
         return combined.includes(gLower);
       });
