@@ -200,21 +200,6 @@ class StreamResolveCache {
   }
 
   async _resolveAndStore(key, mintFn, operation) {
-    if (operation.pruned) return;
-
-    // Reserve this key before any shared-cache I/O. Otherwise concurrent
-    // callers can all pass the pending check while the first awaits L2.
-    // Defer the work so even a synchronous mint failure cleans up only after
-    // the promise has been registered.
-    const p = Promise.resolve()
-      .then(() => this._resolveAndStore(key, mintFn))
-      .finally(() => this.inFlight.delete(key));
-    this.inFlight.set(key, p);
-    await p.catch(() => {});
-    return this.get(key) || [];
-  }
-
-  async _resolveAndStore(key, mintFn) {
 
     // ── Shared L2: another worker may have minted (or be minting) this key ──
     let claimed = false;
