@@ -959,6 +959,16 @@ async function handleStream(type, id, config) {
 
   streams.sort((a, b) => compareStreams(a, b, languagePriorities));
 
+  // Pinned donation link: unshifted to index 0 so it appears at the top of every match
+  const donationUrl = process.env.DONATION_URL || '/donate';
+  if (streams.length > 0 && donationUrl && donationUrl !== 'disabled' && donationUrl !== 'false') {
+    streams.unshift({
+      name: '🧿 Support Us',
+      title: '❤️ Help keep servers & streams alive\nTap to open Donation Center (Ko-fi / Crypto)',
+      externalUrl: donationUrl
+    });
+  }
+
   // Verification now happens once per mint (mintVerifiedSources), not per request.
   // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
 
