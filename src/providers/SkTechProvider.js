@@ -183,7 +183,8 @@ class SkTechProvider extends BaseProvider {
             request: s.headers || {}
           }
         },
-        clearkey: s.clearkey || undefined
+        clearkey: s.clearkey || undefined,
+        language: s.language || src.language || undefined
       }));
     }
 

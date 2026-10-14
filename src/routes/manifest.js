@@ -193,41 +193,134 @@ router.get('/api/manifest', async (req, res) => {
 // Injects W3C/DASH-IF ClearKey ContentProtection tags pointing to our local license endpoint
 // Result: 0% server bandwidth for media chunks; standard ExoPlayer clients decrypt cleanly.
 
+const CLEARKEY_UUID_EXOPLAYER = 'e2719d58-a985-b3c9-781a-b030af78d30e';
+const CLEARKEY_UUID_W3C = '1077efec-c0b2-4d02-ace3-3c1e52e2fb4b';
+
+function toKidBuffer(kid) {
+  if (Buffer.isBuffer(kid)) return kid;
+  if (!kid || typeof kid !== 'string') return null;
+  const cleanHex = kid.replace(/-/g, '');
+  if (/^[0-9a-fA-F]{32}$/.test(cleanHex)) {
+    return Buffer.from(cleanHex, 'hex');
+  }
+  try {
+    const buf = Buffer.from(kid, 'base64url');
+    if (buf.length === 16) return buf;
+  } catch (_) {}
+  return null;
+}
+
+function toBase64Url(val) {
+  if (!val || typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  const cleanHex = trimmed.replace(/-/g, '');
+  if (/^[0-9a-fA-F]{32}$/.test(cleanHex)) {
+    return Buffer.from(cleanHex, 'hex').toString('base64url');
+  }
+  if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0 && trimmed.length >= 32) {
+    return Buffer.from(trimmed, 'hex').toString('base64url');
+  }
+  return trimmed.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function toHyphenatedGuid(kid) {
+  const buf = toKidBuffer(kid);
+  if (!buf || buf.length !== 16) return '';
+  const hex = buf.toString('hex').toUpperCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function generateClearKeyPssh(kids) {
+  const kidList = Array.isArray(kids) ? kids : [kids];
+  const kidBuffers = [];
+  for (const k of kidList) {
+    const kidVal = typeof k === 'object' && k ? (k.kid || k.keyId) : k;
+    const buf = toKidBuffer(kidVal);
+    if (buf && buf.length === 16) {
+      kidBuffers.push(buf);
+    }
+  }
+
+  if (kidBuffers.length === 0) return '';
+
+  const systemId = Buffer.from('1077efecc0b24d02ace33c1e52e2fb4b', 'hex');
+  const kidCount = kidBuffers.length;
+  // Box size: 4 (size) + 4 ('pssh') + 4 (version 1 + flags 0) + 16 (systemId) + 4 (kidCount) + (16 * count) + 4 (dataSize = 0)
+  const boxSize = 36 + (16 * kidCount);
+  const psshBox = Buffer.alloc(boxSize);
+
+  let offset = 0;
+  psshBox.writeUInt32BE(boxSize, offset); offset += 4;
+  psshBox.write('pssh', offset, 4, 'ascii'); offset += 4;
+  psshBox.writeUInt8(1, offset); offset += 1; // version 1
+  psshBox.writeUInt8(0, offset); offset += 1; // flags[0]
+  psshBox.writeUInt8(0, offset); offset += 1; // flags[1]
+  psshBox.writeUInt8(0, offset); offset += 1; // flags[2]
+  systemId.copy(psshBox, offset); offset += 16;
+  psshBox.writeUInt32BE(kidCount, offset); offset += 4;
+  for (const kidBuf of kidBuffers) {
+    kidBuf.copy(psshBox, offset); offset += 16;
+  }
+  psshBox.writeUInt32BE(0, offset); // dataSize = 0
+
+  return psshBox.toString('base64');
+}
+
+function stripDrmProtection(mpd) {
+  if (!mpd || typeof mpd !== 'string') return mpd;
+  const drmUuids = [
+    'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed', // Widevine
+    '9a04f079-9840-4286-ab92-e65be0885f95'  // PlayReady
+  ];
+  for (const uuid of drmUuids) {
+    const selfClosing = new RegExp(`<ContentProtection\\b[^>]*${uuid}[^>]*\\/>\\s*`, 'gi');
+    mpd = mpd.replace(selfClosing, '');
+    const block = new RegExp(`<ContentProtection\\b[^>]*${uuid}[^>]*>[\\s\\S]*?<\\/ContentProtection>\\s*`, 'gi');
+    mpd = mpd.replace(block, '');
+  }
+  return mpd;
+}
+
 function parseClearKeyToken(token) {
   if (!token) return [];
   let str = token;
   if (typeof str !== 'string') return [];
   str = str.trim();
   // Try base64url decode
-  if (!str.startsWith('{') && !str.includes(':')) {
+  if (!str.startsWith('{') && !str.startsWith('[') && !str.includes(':')) {
     try {
-      str = Buffer.from(str, 'base64url').toString('utf8');
+      const decoded = Buffer.from(str, 'base64url').toString('utf8');
+      if (decoded.startsWith('{') || decoded.startsWith('[') || decoded.includes(':')) {
+        str = decoded.trim();
+      }
     } catch (_) {}
   }
   // Try JSON
   if (str.startsWith('{') || str.startsWith('[')) {
     try {
       const parsed = JSON.parse(str);
-      const keysArr = parsed.keys || (parsed.keyId ? [parsed] : []);
+      const keysArr = Array.isArray(parsed)
+        ? parsed
+        : (parsed.keys || (parsed.keyId || parsed.kid ? [parsed] : []));
       return keysArr.map(k => ({
         kty: 'oct',
-        kid: k.kid || k.keyId,
-        k: k.k || k.key
+        kid: toBase64Url(k.kid || k.keyId),
+        k: toBase64Url(k.k || k.key)
       }));
-    } catch (_) {}
+    } catch (_) {
+      return [];
+    }
   }
   // Try hex colon pairs (e.g. kId1:kVal1,kId2:kVal2)
-  const isHex = (s) => typeof s === 'string' && /^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0;
-  const toB64Url = (s) => isHex(s) ? Buffer.from(s, 'hex').toString('base64url') : s;
   const pairs = str.split(',').map(p => p.trim()).filter(Boolean);
   const keys = [];
   for (const p of pairs) {
-    if (p.includes(':')) {
+    if (p.includes(':') && !p.includes('{') && !p.includes('}')) {
       const [kid, k] = p.split(':');
       keys.push({
         kty: 'oct',
-        kid: toB64Url(kid.trim()),
-        k: toB64Url(k.trim())
+        kid: toBase64Url(kid.trim()),
+        k: toBase64Url(k.trim())
       });
     }
   }
@@ -260,33 +353,76 @@ async function handleDashManifestProxy(req, res) {
       return res.status(502).send('Upstream returned non-MPD body');
     }
 
-    // 1. Inject BaseURL if missing so relative segment URLs resolve to upstream CDN
-    if (!mpd.includes('<BaseURL>')) {
-      try {
-        const upstreamBase = new URL('.', targetUrl).toString();
-        mpd = mpd.replace(/(<MPD[^>]*>)/i, `$1\n  <BaseURL>${upstreamBase}</BaseURL>`);
-      } catch (_) {}
+    const upstreamBase = new URL('.', targetUrl).toString();
+
+    // 1. Resolve any existing relative <BaseURL> tags against upstreamBase
+    if (/<BaseURL[^>]*>/i.test(mpd)) {
+      mpd = mpd.replace(/<BaseURL([^>]*)>([\s\S]*?)<\/BaseURL>/gi, (match, attrs, uri) => {
+        const trimmedUri = uri.trim();
+        try {
+          const resolved = new URL(trimmedUri, upstreamBase).toString();
+          return `<BaseURL${attrs}>${resolved}</BaseURL>`;
+        } catch (_) {
+          return match;
+        }
+      });
     }
 
-    // 2. Inject ClearKey ContentProtection if keys are present
-    if (token) {
+    // 2. If no <BaseURL> tag exists at all, inject upstreamBase at top level
+    if (!/<BaseURL[^>]*>/i.test(mpd)) {
+      mpd = mpd.replace(/(<MPD[^>]*>)/i, `$1\n  <BaseURL>${upstreamBase}</BaseURL>`);
+    }
+
+    // 3. Strip upstream Widevine & PlayReady ContentProtection tags case-insensitively
+    mpd = stripDrmProtection(mpd);
+
+    // 4. Inject ClearKey ContentProtection if keys are present
+    const keys = parseClearKeyToken(token);
+    if (keys.length > 0) {
       const reqBase = `${req.protocol}://${req.get('host')}`;
       const licenseUrl = `${reqBase}/api/clearkey/license?token=${encodeURIComponent(token)}`;
-      const ckTags = `
-    <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e" value="ClearKey1.0">
+      const psshBase64 = generateClearKeyPssh(keys);
+      const defaultKidGuid = toHyphenatedGuid(keys[0].kid);
+
+      if (!mpd.includes('xmlns:cenc=')) {
+        mpd = mpd.replace(/(<MPD\b[^>]*)/i, '$1 xmlns:cenc="urn:mpeg:cenc:2013"');
+      }
+
+      // Handle cenc:default_KID on urn:mpeg:dash:mp4protection:2011
+      let cencTag = '';
+      if (defaultKidGuid) {
+        if (mpd.includes('urn:mpeg:dash:mp4protection:2011')) {
+          mpd = mpd.replace(
+            /(<ContentProtection\b[^>]*schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*?)(\/?>)/gi,
+            (match, p1, p2) => {
+              if (/cenc:default_KID=/i.test(p1)) {
+                return `${p1.replace(/cenc:default_KID="[^"]*"/i, `cenc:default_KID="${defaultKidGuid}"`)}${p2}`;
+              }
+              return `${p1} cenc:default_KID="${defaultKidGuid}"${p2}`;
+            }
+          );
+        } else {
+          cencTag = `\n    <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${defaultKidGuid}"/>`;
+        }
+      }
+
+      const psshTag = psshBase64 ? `\n      <cenc:pssh>${psshBase64}</cenc:pssh>` : '';
+      const ckTags = `${cencTag}
+    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_EXOPLAYER}" value="ClearKey1.0">${psshTag}
       <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
       <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
     </ContentProtection>
-    <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b" value="ClearKey1.0">
+    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_W3C}" value="ClearKey1.0">${psshTag}
       <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
       <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
     </ContentProtection>`;
 
-      if (mpd.includes('urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e')) {
-        mpd = mpd.replace(/<ContentProtection[^>]*schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e"[^>]*>([\s\S]*?<\/ContentProtection>)?/gi, ckTags);
-      } else {
-        mpd = mpd.replace(/(<AdaptationSet[^>]*>)/gi, `$1${ckTags}`);
-      }
+      // Strip existing ClearKey tags to avoid duplicates
+      mpd = mpd.replace(new RegExp(`<ContentProtection\\b[^>]*urn:uuid:(?:${CLEARKEY_UUID_EXOPLAYER}|e2719d58-a985-b3c9-781a-b030a7d0e82e|${CLEARKEY_UUID_W3C})[^>]*\\/>\\s*`, 'gi'), '');
+      mpd = mpd.replace(new RegExp(`<ContentProtection\\b[^>]*urn:uuid:(?:${CLEARKEY_UUID_EXOPLAYER}|e2719d58-a985-b3c9-781a-b030a7d0e82e|${CLEARKEY_UUID_W3C})[^>]*>[\\s\\S]*?<\\/ContentProtection>\\s*`, 'gi'), '');
+
+      // Inject into AdaptationSet
+      mpd = mpd.replace(/(<AdaptationSet[^>]*>)/gi, `$1${ckTags}`);
     }
 
     res.setHeader('Content-Type', 'application/dash+xml; charset=utf-8');
@@ -315,7 +451,10 @@ router.all(['/api/clearkey/license', '/api/license'], (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 
-  const rawToken = req.query.token || (req.body && req.body.token) || req.query.keys || '';
+  let rawToken = req.query.token || (req.body && req.body.token) || req.query.keys || '';
+  if (!rawToken && req.body && (req.body.keys || req.body.keyId)) {
+    rawToken = JSON.stringify(req.body);
+  }
   const keys = parseClearKeyToken(rawToken);
 
   return res.json({
@@ -323,5 +462,12 @@ router.all(['/api/clearkey/license', '/api/license'], (req, res) => {
     type: 'temporary'
   });
 });
+
+router.parseClearKeyToken = parseClearKeyToken;
+router.generateClearKeyPssh = generateClearKeyPssh;
+router.toHyphenatedGuid = toHyphenatedGuid;
+router.stripDrmProtection = stripDrmProtection;
+router.CLEARKEY_UUID_EXOPLAYER = CLEARKEY_UUID_EXOPLAYER;
+router.CLEARKEY_UUID_W3C = CLEARKEY_UUID_W3C;
 
 module.exports = router;

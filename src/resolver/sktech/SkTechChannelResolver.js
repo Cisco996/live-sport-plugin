@@ -95,6 +95,7 @@ class SkTechChannelResolver {
           else if (/sports\s*event|fc\s*live/i.test(name)) defaultGroup = 'Sports Channels';
           else if (/boss/i.test(name)) defaultGroup = 'Big Boss';
           else if (/usa\s*live|usa\s*tv|prime\s*usa/i.test(name)) defaultGroup = 'USA TV';
+          else if (/sony|sonyliv/i.test(name) || api.includes('nony')) defaultGroup = 'Sony LIV';
 
           const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
           if (subChannels && subChannels.length > 0) {
@@ -115,7 +116,8 @@ class SkTechChannelResolver {
                 headers: sub.headers,
                 drmScheme: sub.drmScheme,
                 drmLicense: sub.drmLicense,
-                group: sub.group || defaultGroup
+                group: sub.group || defaultGroup,
+                language: sub.language
               });
             }
           }
@@ -342,7 +344,7 @@ class SkTechChannelResolver {
   async resolveChannelStream(channel) {
     if (!channel) return [];
 
-    // Case 0: Pre-unpacked channel from M3U bouquet (e.g. Big Boss, Sun NXT, CricHD)
+    // Case 0: Pre-unpacked channel from M3U bouquet (e.g. Big Boss, Sun NXT, CricHD, Sony LIV)
     if (channel.url && channel.type === 'direct_m3u') {
       const parsed = SkTechEmbedExtractor.parseDelimited(channel.url);
       const streamHeaders = Object.keys(channel.headers || {}).length > 0 ? channel.headers : parsed.headers;
@@ -351,10 +353,14 @@ class SkTechChannelResolver {
         ? SkTechCrypto.formatClearKey(channel.drmLicense)
         : undefined;
 
+      const streamUrl = parsed.url || channel.url;
+      const isPlainHls = !clearkeyObj && streamUrl.includes('.m3u8');
+
       return [{
         name: '⚡ Direct Stream',
         title: `SK Tech | ${channel.title}${channel.group ? ' (' + channel.group + ')' : ''}`,
-        url: parsed.url || channel.url,
+        url: streamUrl,
+        language: channel.language,
         behaviorHints: {
           notWebReady: true,
           proxyHeaders: {
@@ -362,7 +368,7 @@ class SkTechChannelResolver {
           }
         },
         clearkey: clearkeyObj,
-        score: 95
+        score: isPlainHls ? 96 : 95
       }];
     }
 
@@ -444,10 +450,13 @@ class SkTechChannelResolver {
                 ? SkTechCrypto.formatClearKey(ch.drmLicense)
                 : undefined;
 
+              const isPlainHls = !clearkeyObj && (ch.url || '').includes('.m3u8');
+
               streams.push({
                 name: '⚡ Direct Stream',
                 title: `SK Tech | ${ch.title}`,
                 url: ch.url,
+                language: ch.language,
                 behaviorHints: {
                   notWebReady: true,
                   proxyHeaders: {
@@ -455,7 +464,7 @@ class SkTechChannelResolver {
                   }
                 },
                 clearkey: clearkeyObj,
-                score: 90
+                score: isPlainHls ? 96 : 90
               });
             }
 

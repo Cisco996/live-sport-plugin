@@ -147,4 +147,212 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       expect(manifestUrl).toContain('ua=TestUA');
     });
   });
+
+  describe('parseClearKeyToken()', () => {
+    test('parses base64url JSON token with keyId and key', () => {
+      const raw = { keyId: 'ufHLihNhRXu9gJf4wlkAAA', key: 'GWAnS3ujRMuJnrougJFndA' };
+      const token = Buffer.from(JSON.stringify(raw)).toString('base64url');
+      const parsed = manifestRouter.parseClearKeyToken(token);
+      expect(parsed).toEqual([
+        { kty: 'oct', kid: 'ufHLihNhRXu9gJf4wlkAAA', k: 'GWAnS3ujRMuJnrougJFndA' }
+      ]);
+    });
+
+    test('parses base64url JSON token with keys array and hex strings', () => {
+      const raw = {
+        keys: [{
+          kty: 'oct',
+          kid: 'a71918fcc2f12066f70b7c39b0e0dcf3',
+          k: 'a5e35121d4f6f16694bea15334f14814'
+        }]
+      };
+      const token = Buffer.from(JSON.stringify(raw)).toString('base64url');
+      const parsed = manifestRouter.parseClearKeyToken(token);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].kid).toBe('pxkY_MLxIGb3C3w5sODc8w');
+      expect(parsed[0].k).toBe('peNRIdT28WaUvqFTNPFIFA');
+    });
+
+    test('parses raw colon-separated hex string', () => {
+      const raw = 'b9f1cb8a1361457bbd8097f8c2590000:1960274b7ba344cb899eba2e80916774';
+      const parsed = manifestRouter.parseClearKeyToken(raw);
+      expect(parsed).toEqual([
+        { kty: 'oct', kid: 'ufHLihNhRXu9gJf4wlkAAA', k: 'GWAnS3ujRMuJnrougJFndA' }
+      ]);
+    });
+
+    test('handles empty or invalid inputs gracefully', () => {
+      expect(manifestRouter.parseClearKeyToken('')).toEqual([]);
+      expect(manifestRouter.parseClearKeyToken(null)).toEqual([]);
+      expect(manifestRouter.parseClearKeyToken(undefined)).toEqual([]);
+    });
+  });
+
+  describe('generateClearKeyPssh() & toHyphenatedGuid()', () => {
+    test('generates valid version 1 ISO-BMFF PSSH box for ClearKey', () => {
+      const kidHex = 'a71918fcc2f12066f70b7c39b0e0dcf3';
+      const psshB64 = manifestRouter.generateClearKeyPssh(kidHex);
+      expect(psshB64).toBeTruthy();
+
+      const psshBuf = Buffer.from(psshB64, 'base64');
+      // Box size: 52 bytes
+      expect(psshBuf.length).toBe(52);
+      expect(psshBuf.readUInt32BE(0)).toBe(52);
+      expect(psshBuf.toString('ascii', 4, 8)).toBe('pssh');
+      expect(psshBuf.readUInt8(8)).toBe(1); // Version 1
+      expect(psshBuf.readUInt8(9)).toBe(0); // Flag 0
+      expect(psshBuf.readUInt8(10)).toBe(0); // Flag 1
+      expect(psshBuf.readUInt8(11)).toBe(0); // Flag 2
+      // SystemID: 1077efec-c0b2-4d02-ace3-3c1e52e2fb4b
+      expect(psshBuf.subarray(12, 28).toString('hex')).toBe('1077efecc0b24d02ace33c1e52e2fb4b');
+      // KID count: 1
+      expect(psshBuf.readUInt32BE(28)).toBe(1);
+      // KID: matches input hex
+      expect(psshBuf.subarray(32, 48).toString('hex')).toBe(kidHex);
+      // Data size: 0
+      expect(psshBuf.readUInt32BE(48)).toBe(0);
+    });
+
+    test('toHyphenatedGuid produces uppercase hyphenated GUID', () => {
+      const guid = manifestRouter.toHyphenatedGuid('a71918fcc2f12066f70b7c39b0e0dcf3');
+      expect(guid).toBe('A71918FC-C2F1-2066-F70B-7C39B0E0DCF3');
+
+      const guidFromB64 = manifestRouter.toHyphenatedGuid('pxkY_MLxIGb3C3w5sODc8w');
+      expect(guidFromB64).toBe('A71918FC-C2F1-2066-F70B-7C39B0E0DCF3');
+    });
+  });
+
+  describe('stripDrmProtection()', () => {
+    test('removes Widevine and PlayReady ContentProtection tags case-insensitively', () => {
+      const sampleMpd = `<MPD>
+  <Period>
+    <AdaptationSet>
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed">
+        <cenc:pssh>WidevinePsshData</cenc:pssh>
+      </ContentProtection>
+      <ContentProtection schemeIdUri="urn:uuid:9A04F079-9840-4286-AB92-E65BE0885F95" value="MSPR 2.0"/>
+      <Representation id="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+
+      const stripped = manifestRouter.stripDrmProtection(sampleMpd);
+      expect(stripped).not.toContain('edef8ba9-79d6-4ace-a3c8-27dcd51d21ed');
+      expect(stripped).not.toContain('9A04F079-9840-4286-AB92-E65BE0885F95');
+      expect(stripped).not.toContain('WidevinePsshData');
+      expect(stripped).toContain('<Representation id="1"/>');
+    });
+  });
+
+  describe('DASH Manifest Proxy Endpoint (/api/manifest.mpd)', () => {
+    let mockUpstreamServer;
+    let mockUpstreamPort;
+    let mockUpstreamUrl;
+
+    beforeAll((done) => {
+      const mockApp = express();
+      mockApp.get('/live/stream.mpd', (req, res) => {
+        const mpdBody = `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+  <BaseURL>dash/</BaseURL>
+  <Period id="0">
+    <AdaptationSet mimeType="video/mp4">
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed">
+        <cenc:pssh>UpstreamWidevinePssh</cenc:pssh>
+      </ContentProtection>
+      <ContentProtection schemeIdUri="urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95" value="PlayReady"/>
+      <Representation id="video_1080p" bandwidth="5000000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+        res.setHeader('Content-Type', 'application/dash+xml');
+        res.send(mpdBody);
+      });
+
+      mockUpstreamServer = http.createServer(mockApp);
+      mockUpstreamServer.listen(0, '127.0.0.1', () => {
+        mockUpstreamPort = mockUpstreamServer.address().port;
+        mockUpstreamUrl = `http://127.0.0.1:${mockUpstreamPort}/live/stream.mpd`;
+        done();
+      });
+    });
+
+    afterAll((done) => {
+      if (mockUpstreamServer) {
+        mockUpstreamServer.close(done);
+      } else {
+        done();
+      }
+    });
+
+    test('rewrites relative BaseURL, strips Widevine/PlayReady, and injects ExoPlayer af78d30e UUID + cenc:default_KID', async () => {
+      const keyObj = {
+        keyId: 'a71918fcc2f12066f70b7c39b0e0dcf3',
+        key: 'a5e35121d4f6f16694bea15334f14814'
+      };
+      const token = Buffer.from(JSON.stringify(keyObj)).toString('base64url');
+
+      const proxyUrl = `${baseUrl}/api/manifest.mpd?url=${encodeURIComponent(mockUpstreamUrl)}&token=${encodeURIComponent(token)}`;
+      const res = await fetch(proxyUrl);
+      expect(res.status).toBe(200);
+
+      const mpdText = await res.text();
+
+      // 1. BaseURL resolved against upstream base
+      expect(mpdText).toContain(`<BaseURL>http://127.0.0.1:${mockUpstreamPort}/live/dash/</BaseURL>`);
+      expect(mpdText).not.toContain('<BaseURL>dash/</BaseURL>');
+
+      // 2. Widevine & PlayReady stripped
+      expect(mpdText).not.toContain('edef8ba9-79d6-4ace-a3c8-27dcd51d21ed');
+      expect(mpdText).not.toContain('9a04f079-9840-4286-ab92-e65be0885f95');
+      expect(mpdText).not.toContain('UpstreamWidevinePssh');
+
+      // 3. ClearKey UUID with af78d30e and W3C UUID injected
+      expect(mpdText).toContain('urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e');
+      expect(mpdText).not.toContain('e2719d58-a985-b3c9-781a-b030a7d0e82e');
+      expect(mpdText).toContain('urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b');
+
+      // 4. cenc:default_KID formatted as hyphenated uppercase GUID
+      expect(mpdText).toContain('cenc:default_KID="A71918FC-C2F1-2066-F70B-7C39B0E0DCF3"');
+
+      // 5. cenc:pssh box present
+      expect(mpdText).toContain('<cenc:pssh>');
+    });
+  });
+
+  describe('Stream format prioritization (Plain HLS over DASH DRM)', () => {
+    const { compareStreams, streamFormatTier } = require('../src/services/LanguagePriorityService');
+
+    test('streamFormatTier assigns 0 to plain HLS and 2 to DASH DRM', () => {
+      const plainHls = { name: '⚡ Direct Stream', url: 'https://cdn.example.com/stream.m3u8' };
+      const dashDrm = { name: '⚡ Direct Stream', url: 'https://cdn.example.com/stream.mpd', clearkey: { keyId: 'abc' } };
+      const otherStream = { name: '⚡ Direct Stream', url: 'https://cdn.example.com/video.mp4' };
+
+      expect(streamFormatTier(plainHls)).toBe(0);
+      expect(streamFormatTier(dashDrm)).toBe(2);
+      expect(streamFormatTier(otherStream)).toBe(1);
+    });
+
+    test('prioritizes unencrypted HLS above DASH DRM of the same language', () => {
+      const plainHls = {
+        name: '⚡ Direct Stream',
+        title: 'Sony SAB HD (Plain HLS)',
+        language: 'Hindi',
+        url: 'https://cdn.example.com/live/sab.m3u8',
+        score: 90
+      };
+      const dashDrm = {
+        name: '⚡ Direct Stream',
+        title: 'Sony SAB HD (DASH DRM)',
+        language: 'Hindi',
+        url: 'https://cdn.example.com/live/sab.mpd',
+        clearkey: { keyId: 'abc' },
+        score: 95
+      };
+
+      const sorted = [dashDrm, plainHls].sort((a, b) => compareStreams(a, b, []));
+      expect(sorted[0].title).toBe('Sony SAB HD (Plain HLS)');
+      expect(sorted[1].title).toBe('Sony SAB HD (DASH DRM)');
+    });
+  });
 });

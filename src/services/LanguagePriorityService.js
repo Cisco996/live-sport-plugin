@@ -247,14 +247,36 @@ function streamRankScore(stream) {
 }
 
 /**
+ * Format tier for streams within the same language rank:
+ *   Tier 0: Plain HLS (.m3u8, unencrypted) - highest priority
+ *   Tier 1: Other direct streams
+ *   Tier 2: DASH DRM (.mpd or streams requiring DRM decryption) - lower priority
+ */
+function streamFormatTier(stream) {
+  if (!stream) return 1;
+  const url = ((stream.url || '') + ' ' + (stream.externalUrl || '')).toLowerCase();
+  const isDrm = Boolean(
+    stream.clearkey ||
+    stream.drmScheme ||
+    (stream.behaviorHints && (stream.behaviorHints.drm || stream.behaviorHints.drmScheme))
+  );
+
+  // Plain HLS: .m3u8 without DRM
+  if (url.includes('.m3u8') && !isDrm) return 0;
+  // DASH DRM: .mpd or explicit DRM
+  if (url.includes('.mpd') || isDrm) return 2;
+  return 1;
+}
+
+/**
  * The comparator handleStream applies to its assembled stream list.
  * `priorities` is the parsed list; pass parseLanguagePriority(config).
  *
- * Order, unchanged from the hard-coded sort except that the language tier is
- * now configurable:
+ * Order:
  *   1. direct streams before web fallbacks
  *   2. language rank
- *   3. rankScore = score*0.8 + speedScore*0.2
+ *   3. format tier (plain HLS before DASH DRM)
+ *   4. rankScore = score*0.8 + speedScore*0.2
  */
 function compareStreams(a, b, priorities) {
   try {
@@ -264,6 +286,9 @@ function compareStreams(a, b, priorities) {
 
     const rankDelta = languageRank(a && a.language, priorities) - languageRank(b && b.language, priorities);
     if (rankDelta) return rankDelta;
+
+    const formatDelta = streamFormatTier(a) - streamFormatTier(b);
+    if (formatDelta) return formatDelta;
 
     return streamRankScore(b) - streamRankScore(a);
   } catch (_) {
@@ -282,6 +307,7 @@ module.exports = {
   canonicalLanguage,
   isEnglish,
   streamRankScore,
+  streamFormatTier,
   compareStreams,
   // Exported for tests: the fold is the single place the matching semantics of
   // every alias lookup are defined.
