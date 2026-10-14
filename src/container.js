@@ -25,6 +25,7 @@ const StreamResolveCache = require('./services/StreamResolveCache');
 const IframeDomainRegistry = require('./services/IframeDomainRegistry');
 const PpvStProvider = require('./providers/PpvStProvider');
 const SoccerFullProvider = require('./providers/SoccerFullProvider');
+const BasketballVideoProvider = require('./providers/BasketballVideoProvider');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -65,6 +66,7 @@ container.register({
   damiTvProvider: asClass(DamiTvProvider).singleton(),
   ppvStProvider: asClass(PpvStProvider).singleton(),
   soccerFullProvider: asClass(SoccerFullProvider).singleton(),
+  basketballVideoProvider: asClass(BasketballVideoProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 
