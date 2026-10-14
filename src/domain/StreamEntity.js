@@ -1,5 +1,5 @@
 class StreamEntity {
-  constructor({ name, title, url, externalUrl, resolution, bitrate, score, behaviorHints, clearkey }) {
+  constructor({ name, title, url, externalUrl, resolution, bitrate, score, behaviorHints, clearkey, language }) {
     this.name = name || 'Unknown Proxy';
     this.title = title || 'Unknown Stream';
     
@@ -19,6 +19,9 @@ class StreamEntity {
     }
     if (clearkey) {
       this.clearkey = clearkey;
+    }
+    if (language) {
+      this.language = language;
     }
   }
 }

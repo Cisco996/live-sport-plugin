@@ -948,7 +948,7 @@ async function handleStream(type, id, config) {
 
     // If it's a DASH stream with ClearKey DRM, route it through our manifest proxy so ExoPlayer can decrypt
     if (s.url && s.url.includes('.mpd') && s.clearkey && !s.url.includes('/api/manifest')) {
-      s.externalUrl = s.url;
+      s._rawMpdUrl = s.url;
       s.url = SkTechCrypto.buildDashManifestUrl(s.url, s.clearkey, s.behaviorHints.proxyHeaders?.request || {});
     }
     

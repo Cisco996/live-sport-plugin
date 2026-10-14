@@ -17,6 +17,7 @@ const {
 } = require('../remint');
 const { rewriteHlsUri } = require('../services/HlsRewriteService');
 const { safeFetch: _safeFetch } = require('../impitClient');
+const { getRequestBaseUrl } = require('../config');
 
 router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
@@ -230,7 +231,7 @@ function toHyphenatedGuid(kid) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-function generateClearKeyPssh(kids) {
+function generateClearKeyPssh(kids, systemIdHex = '1077efecc0b24d02ace33c1e52e2fb4b') {
   const kidList = Array.isArray(kids) ? kids : [kids];
   const kidBuffers = [];
   for (const k of kidList) {
@@ -243,7 +244,8 @@ function generateClearKeyPssh(kids) {
 
   if (kidBuffers.length === 0) return '';
 
-  const systemId = Buffer.from('1077efecc0b24d02ace33c1e52e2fb4b', 'hex');
+  const cleanSystemId = (systemIdHex || '').replace(/-/g, '');
+  const systemId = Buffer.from(cleanSystemId, 'hex');
   const kidCount = kidBuffers.length;
   // Box size: 4 (size) + 4 ('pssh') + 4 (version 1 + flags 0) + 16 (systemId) + 4 (kidCount) + (16 * count) + 4 (dataSize = 0)
   const boxSize = 36 + (16 * kidCount);
@@ -270,7 +272,8 @@ function stripDrmProtection(mpd) {
   if (!mpd || typeof mpd !== 'string') return mpd;
   const drmUuids = [
     'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed', // Widevine
-    '9a04f079-9840-4286-ab92-e65be0885f95'  // PlayReady
+    '9a04f079-9840-4286-ab92-e65be0885f95', // PlayReady
+    '94ce86fb-07ff-4f43-adb8-93d2fa968ca2'  // FairPlay
   ];
   for (const uuid of drmUuids) {
     const selfClosing = new RegExp(`<ContentProtection\\b[^>]*${uuid}[^>]*\\/>\\s*`, 'gi');
@@ -278,11 +281,28 @@ function stripDrmProtection(mpd) {
     const block = new RegExp(`<ContentProtection\\b[^>]*${uuid}[^>]*>[\\s\\S]*?<\\/ContentProtection>\\s*`, 'gi');
     mpd = mpd.replace(block, '');
   }
+  const valueDrms = ['widevine', 'playready', 'mspr'];
+  for (const val of valueDrms) {
+    const selfClosing = new RegExp(`<ContentProtection\\b[^>]*value="${val}"[^>]*\\/>\\s*`, 'gi');
+    mpd = mpd.replace(selfClosing, '');
+    const block = new RegExp(`<ContentProtection\\b[^>]*value="${val}"[^>]*>[\\s\\S]*?<\\/ContentProtection>\\s*`, 'gi');
+    mpd = mpd.replace(block, '');
+  }
   return mpd;
 }
 
 function parseClearKeyToken(token) {
   if (!token) return [];
+  if (typeof token === 'object') {
+    const keysArr = Array.isArray(token)
+      ? token
+      : (token.keys || (token.keyId || token.kid ? [token] : []));
+    return keysArr.map(k => ({
+      kty: 'oct',
+      kid: toBase64Url(k.kid || k.keyId),
+      k: toBase64Url(k.k || k.key)
+    })).filter(k => k.kid && k.k);
+  }
   let str = token;
   if (typeof str !== 'string') return [];
   str = str.trim();
@@ -306,7 +326,7 @@ function parseClearKeyToken(token) {
         kty: 'oct',
         kid: toBase64Url(k.kid || k.keyId),
         k: toBase64Url(k.k || k.key)
-      }));
+      })).filter(k => k.kid && k.k);
     } catch (_) {
       return [];
     }
@@ -317,11 +337,15 @@ function parseClearKeyToken(token) {
   for (const p of pairs) {
     if (p.includes(':') && !p.includes('{') && !p.includes('}')) {
       const [kid, k] = p.split(':');
-      keys.push({
-        kty: 'oct',
-        kid: toBase64Url(kid.trim()),
-        k: toBase64Url(k.trim())
-      });
+      const b64Kid = toBase64Url(kid.trim());
+      const b64K = toBase64Url(k.trim());
+      if (b64Kid && b64K) {
+        keys.push({
+          kty: 'oct',
+          kid: b64Kid,
+          k: b64K
+        });
+      }
     }
   }
   return keys;
@@ -379,42 +403,69 @@ async function handleDashManifestProxy(req, res) {
     // 4. Inject ClearKey ContentProtection if keys are present
     const keys = parseClearKeyToken(token);
     if (keys.length > 0) {
-      const reqBase = `${req.protocol}://${req.get('host')}`;
+      const reqBase = getRequestBaseUrl(req);
       const licenseUrl = `${reqBase}/api/clearkey/license?token=${encodeURIComponent(token)}`;
-      const psshBase64 = generateClearKeyPssh(keys);
+      const psshW3c = generateClearKeyPssh(keys, CLEARKEY_UUID_W3C);
+      const psshExo = generateClearKeyPssh(keys, CLEARKEY_UUID_EXOPLAYER);
       const defaultKidGuid = toHyphenatedGuid(keys[0].kid);
 
       if (!mpd.includes('xmlns:cenc=')) {
         mpd = mpd.replace(/(<MPD\b[^>]*)/i, '$1 xmlns:cenc="urn:mpeg:cenc:2013"');
       }
 
-      // Handle cenc:default_KID on urn:mpeg:dash:mp4protection:2011
+      // Handle cenc:default_KID and cenc:pssh on urn:mpeg:dash:mp4protection:2011
       let cencTag = '';
       if (defaultKidGuid) {
         if (mpd.includes('urn:mpeg:dash:mp4protection:2011')) {
+          // If self-closing: replace with block containing pssh
           mpd = mpd.replace(
-            /(<ContentProtection\b[^>]*schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*?)(\/?>)/gi,
-            (match, p1, p2) => {
-              if (/cenc:default_KID=/i.test(p1)) {
-                return `${p1.replace(/cenc:default_KID="[^"]*"/i, `cenc:default_KID="${defaultKidGuid}"`)}${p2}`;
+            /<ContentProtection\b([^>]*schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*?)\/>/gi,
+            (match, attrs) => {
+              let updatedAttrs = attrs;
+              if (/cenc:default_KID=/i.test(updatedAttrs)) {
+                updatedAttrs = updatedAttrs.replace(/cenc:default_KID="[^"]*"/i, `cenc:default_KID="${defaultKidGuid}"`);
+              } else {
+                updatedAttrs += ` cenc:default_KID="${defaultKidGuid}"`;
               }
-              return `${p1} cenc:default_KID="${defaultKidGuid}"${p2}`;
+              return `<ContentProtection${updatedAttrs}>${psshW3c ? `\n      <cenc:pssh>${psshW3c}</cenc:pssh>\n    ` : ''}</ContentProtection>`;
+            }
+          );
+          // If block tag: update cenc:default_KID and replace/inject cenc:pssh
+          mpd = mpd.replace(
+            /<ContentProtection\b([^>]*schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*?)>([\s\S]*?)<\/ContentProtection>/gi,
+            (match, attrs, inner) => {
+              let updatedAttrs = attrs;
+              if (/cenc:default_KID=/i.test(updatedAttrs)) {
+                updatedAttrs = updatedAttrs.replace(/cenc:default_KID="[^"]*"/i, `cenc:default_KID="${defaultKidGuid}"`);
+              } else {
+                updatedAttrs += ` cenc:default_KID="${defaultKidGuid}"`;
+              }
+              let updatedInner = inner;
+              if (/<cenc:pssh\b/i.test(updatedInner)) {
+                updatedInner = updatedInner.replace(/<cenc:pssh[^>]*>[\s\S]*?<\/cenc:pssh>/gi, `<cenc:pssh>${psshW3c}</cenc:pssh>`);
+              } else if (psshW3c) {
+                updatedInner = `\n      <cenc:pssh>${psshW3c}</cenc:pssh>${updatedInner}`;
+              }
+              return `<ContentProtection${updatedAttrs}>${updatedInner}</ContentProtection>`;
             }
           );
         } else {
-          cencTag = `\n    <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${defaultKidGuid}"/>`;
+          cencTag = `\n    <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${defaultKidGuid}">${psshW3c ? `\n      <cenc:pssh>${psshW3c}</cenc:pssh>\n    ` : ''}</ContentProtection>`;
         }
       }
 
-      const psshTag = psshBase64 ? `\n      <cenc:pssh>${psshBase64}</cenc:pssh>` : '';
+      const psshTagExo = psshExo ? `\n      <cenc:pssh>${psshExo}</cenc:pssh>` : '';
+      const psshTagW3c = psshW3c ? `\n      <cenc:pssh>${psshW3c}</cenc:pssh>` : '';
       const ckTags = `${cencTag}
-    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_EXOPLAYER}" value="ClearKey1.0">${psshTag}
+    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_EXOPLAYER}" value="ClearKey1.0">${psshTagExo}
       <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
       <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
+      <dashif:Laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:Laurl>
     </ContentProtection>
-    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_W3C}" value="ClearKey1.0">${psshTag}
+    <ContentProtection schemeIdUri="urn:uuid:${CLEARKEY_UUID_W3C}" value="ClearKey1.0">${psshTagW3c}
       <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
       <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
+      <dashif:Laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:Laurl>
     </ContentProtection>`;
 
       // Strip existing ClearKey tags to avoid duplicates
@@ -437,6 +488,9 @@ async function handleDashManifestProxy(req, res) {
 }
 
 router.get('/api/manifest.mpd', handleDashManifestProxy);
+
+router.use(['/api/clearkey/license', '/api/license'], express.json());
+router.use(['/api/clearkey/license', '/api/license'], express.urlencoded({ extended: true }));
 
 router.options(['/api/clearkey/license', '/api/license'], (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');

@@ -186,6 +186,14 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       expect(manifestRouter.parseClearKeyToken(null)).toEqual([]);
       expect(manifestRouter.parseClearKeyToken(undefined)).toEqual([]);
     });
+
+    test('supports token passed directly as a JavaScript object', () => {
+      const obj = { keyId: 'ufHLihNhRXu9gJf4wlkAAA', key: 'GWAnS3ujRMuJnrougJFndA' };
+      const parsed = manifestRouter.parseClearKeyToken(obj);
+      expect(parsed).toEqual([
+        { kty: 'oct', kid: 'ufHLihNhRXu9gJf4wlkAAA', k: 'GWAnS3ujRMuJnrougJFndA' }
+      ]);
+    });
   });
 
   describe('generateClearKeyPssh() & toHyphenatedGuid()', () => {
@@ -213,6 +221,13 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       expect(psshBuf.readUInt32BE(48)).toBe(0);
     });
 
+    test('supports custom System ID for ExoPlayer ClearKey UUID', () => {
+      const kidHex = 'a71918fcc2f12066f70b7c39b0e0dcf3';
+      const psshB64 = manifestRouter.generateClearKeyPssh(kidHex, manifestRouter.CLEARKEY_UUID_EXOPLAYER);
+      const psshBuf = Buffer.from(psshB64, 'base64');
+      expect(psshBuf.subarray(12, 28).toString('hex')).toBe('e2719d58a985b3c9781ab030af78d30e');
+    });
+
     test('toHyphenatedGuid produces uppercase hyphenated GUID', () => {
       const guid = manifestRouter.toHyphenatedGuid('a71918fcc2f12066f70b7c39b0e0dcf3');
       expect(guid).toBe('A71918FC-C2F1-2066-F70B-7C39B0E0DCF3');
@@ -231,6 +246,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
         <cenc:pssh>WidevinePsshData</cenc:pssh>
       </ContentProtection>
       <ContentProtection schemeIdUri="urn:uuid:9A04F079-9840-4286-AB92-E65BE0885F95" value="MSPR 2.0"/>
+      <ContentProtection value="Widevine"/>
       <Representation id="1"/>
     </AdaptationSet>
   </Period>
@@ -240,6 +256,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       expect(stripped).not.toContain('edef8ba9-79d6-4ace-a3c8-27dcd51d21ed');
       expect(stripped).not.toContain('9A04F079-9840-4286-AB92-E65BE0885F95');
       expect(stripped).not.toContain('WidevinePsshData');
+      expect(stripped).not.toContain('value="Widevine"');
       expect(stripped).toContain('<Representation id="1"/>');
     });
   });
@@ -257,6 +274,9 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
   <BaseURL>dash/</BaseURL>
   <Period id="0">
     <AdaptationSet mimeType="video/mp4">
+      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc">
+        <cenc:pssh>UpstreamWidevinePsshInCenc</cenc:pssh>
+      </ContentProtection>
       <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed">
         <cenc:pssh>UpstreamWidevinePssh</cenc:pssh>
       </ContentProtection>
@@ -285,7 +305,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       }
     });
 
-    test('rewrites relative BaseURL, strips Widevine/PlayReady, and injects ExoPlayer af78d30e UUID + cenc:default_KID', async () => {
+    test('rewrites relative BaseURL, strips Widevine/PlayReady, overwrites cenc Widevine PSSH, and injects ExoPlayer af78d30e UUID + cenc:default_KID', async () => {
       const keyObj = {
         keyId: 'a71918fcc2f12066f70b7c39b0e0dcf3',
         key: 'a5e35121d4f6f16694bea15334f14814'
@@ -302,10 +322,11 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       expect(mpdText).toContain(`<BaseURL>http://127.0.0.1:${mockUpstreamPort}/live/dash/</BaseURL>`);
       expect(mpdText).not.toContain('<BaseURL>dash/</BaseURL>');
 
-      // 2. Widevine & PlayReady stripped
+      // 2. Widevine & PlayReady stripped, and upstream Widevine PSSH inside cenc overwritten
       expect(mpdText).not.toContain('edef8ba9-79d6-4ace-a3c8-27dcd51d21ed');
       expect(mpdText).not.toContain('9a04f079-9840-4286-ab92-e65be0885f95');
       expect(mpdText).not.toContain('UpstreamWidevinePssh');
+      expect(mpdText).not.toContain('UpstreamWidevinePsshInCenc');
 
       // 3. ClearKey UUID with af78d30e and W3C UUID injected
       expect(mpdText).toContain('urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e');
@@ -315,13 +336,27 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       // 4. cenc:default_KID formatted as hyphenated uppercase GUID
       expect(mpdText).toContain('cenc:default_KID="A71918FC-C2F1-2066-F70B-7C39B0E0DCF3"');
 
-      // 5. cenc:pssh box present
+      // 5. cenc:pssh box present and dashif:Laurl present
       expect(mpdText).toContain('<cenc:pssh>');
+      expect(mpdText).toContain('<dashif:Laurl');
+      expect(mpdText).toContain('<dashif:laurl');
+      expect(mpdText).toContain('<clearkey:Laurl');
     });
   });
 
-  describe('Stream format prioritization (Plain HLS over DASH DRM)', () => {
+  describe('Stream format prioritization (Plain HLS over DASH DRM) and StreamEntity', () => {
     const { compareStreams, streamFormatTier } = require('../src/services/LanguagePriorityService');
+    const StreamEntity = require('../src/domain/StreamEntity');
+
+    test('StreamEntity preserves language property', () => {
+      const entity = new StreamEntity({
+        name: 'SK Tech',
+        title: 'Sony SAB HD',
+        url: 'https://cdn.example.com/sab.m3u8',
+        language: 'Hindi'
+      });
+      expect(entity.language).toBe('Hindi');
+    });
 
     test('streamFormatTier assigns 0 to plain HLS and 2 to DASH DRM', () => {
       const plainHls = { name: '⚡ Direct Stream', url: 'https://cdn.example.com/stream.m3u8' };

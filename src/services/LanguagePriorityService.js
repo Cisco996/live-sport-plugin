@@ -254,7 +254,7 @@ function streamRankScore(stream) {
  */
 function streamFormatTier(stream) {
   if (!stream) return 1;
-  const url = ((stream.url || '') + ' ' + (stream.externalUrl || '')).toLowerCase();
+  const url = ((stream.url || '') + ' ' + (stream._rawMpdUrl || '') + ' ' + (stream.externalUrl || '')).toLowerCase();
   const isDrm = Boolean(
     stream.clearkey ||
     stream.drmScheme ||
