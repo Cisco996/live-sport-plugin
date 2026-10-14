@@ -341,7 +341,7 @@ class ReplayZoneProvider {
             if (!s.url) continue;
             const resLabel = s.label || (s.height ? `${s.height}p` : '1080p');
             const cleanPart = partName.trim();
-            const streamTitle = cleanPart ? `${cleanPart} (${resLabel})` : `Stream (${resLabel})`;
+            const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Stream (${resLabel}) [SprintCDN]`;
 
             streams.push({
                 name: 'ReplayZone',
@@ -349,7 +349,7 @@ class ReplayZoneProvider {
                 resolution: resLabel,
                 url: s.url,
                 behaviorHints: {
-                    notWebReady: true,
+                    notWebReady: false,
                     proxyHeaders: {
                         request: {
                             'Origin': `https://${host}`,
@@ -494,7 +494,7 @@ class ReplayZoneProvider {
                 for (const v of metaObj.videos) {
                     if (!v.url) continue;
                     const label = qualityMap[v.name] || v.name || 'HD';
-                    const title = cleanPart ? `${cleanPart} (${label})` : `Replay (${label})`;
+                    const title = cleanPart ? `${cleanPart} (${label}) [OK.ru]` : `Replay (${label}) [OK.ru]`;
 
                     streams.push({
                         name: 'ReplayZone',
@@ -512,7 +512,7 @@ class ReplayZoneProvider {
             if (metaObj.hlsManifestUrl) {
                 streams.push({
                     name: 'ReplayZone',
-                    title: cleanPart ? `${cleanPart} (Auto HLS)` : 'Replay (Auto HLS)',
+                    title: cleanPart ? `${cleanPart} (Auto HLS) [OK.ru]` : 'Replay (Auto HLS) [OK.ru]',
                     resolution: 'Auto',
                     url: metaObj.hlsManifestUrl,
                     behaviorHints: {
@@ -592,7 +592,9 @@ class ReplayZoneProvider {
                 iframes.push(m[1]);
             }
 
-            const streams = [];
+            const byseStreams = [];
+            const okStreams = [];
+            const otherStreams = [];
             for (const iframeSrc of iframes) {
                 let fullIframeUrl;
                 try {
@@ -602,24 +604,26 @@ class ReplayZoneProvider {
                 }
 
                 if (this._isByseUrl(fullIframeUrl)) {
-                    const byseStreams = await this.extractByse(fullIframeUrl, partName);
-                    if (byseStreams && byseStreams.length > 0) {
-                        streams.push(...byseStreams);
+                    const extracted = await this.extractByse(fullIframeUrl, partName);
+                    if (extracted && extracted.length > 0) {
+                        byseStreams.push(...extracted);
                     }
                 } else if (fullIframeUrl.includes('ok.ru')) {
-                    const okStreams = await this._resolveOkRu(fullIframeUrl, partName);
-                    if (okStreams && okStreams.length > 0) {
-                        streams.push(...okStreams);
+                    const extracted = await this._resolveOkRu(fullIframeUrl, partName);
+                    if (extracted && extracted.length > 0) {
+                        okStreams.push(...extracted);
                     }
                 } else if (this._isDailymotionUrl(fullIframeUrl)) {
                     const dmStreams = await this._resolveDailymotion(fullIframeUrl, partName);
                     if (dmStreams && dmStreams.length > 0) {
-                        streams.push(...dmStreams);
+                        otherStreams.push(...dmStreams);
                     }
                 } else if (this._isDirectMediaUrl(fullIframeUrl)) {
-                    streams.push(this._buildDirectStream(fullIframeUrl, partName));
+                    otherStreams.push(this._buildDirectStream(fullIframeUrl, partName));
                 }
             }
+
+            const streams = [...byseStreams, ...okStreams, ...otherStreams];
 
             if (streams.length > 0) {
                 return streams;

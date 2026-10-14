@@ -215,7 +215,9 @@ class BasketballVideoProvider extends BaseProvider {
         return text.includes('Watch') || text.includes('Part') || text.includes('Server');
       });
 
-      const streams = [];
+      const byseStreams = [];
+      const okStreams = [];
+      const directStreams = [];
 
       for (let i = 0; i < watchLinks.length; i++) {
         let dest = watchLinks[i][1];
@@ -238,27 +240,27 @@ class BasketballVideoProvider extends BaseProvider {
           dest = `https:${dest}`;
         }
 
-        // 1. OK.ru Direct Video Extraction (1080p, 720p, 480p)
-        if (dest.includes('ok.ru')) {
-          const okStreams = await this._extractOkRu(dest, partName);
-          if (okStreams && okStreams.length > 0) {
-            streams.push(...okStreams);
+        // 1. Byse AES-256-GCM Payload Extraction (Top Priority - SprintCDN Edge)
+        if (this._isByseUrl(dest)) {
+          const extracted = await this._extractByse(dest, partName);
+          if (extracted && extracted.length > 0) {
+            byseStreams.push(...extracted);
             continue;
           }
         }
 
-        // 2. Byse AES-256-GCM Payload Extraction
-        if (this._isByseUrl(dest)) {
-          const byseStreams = await this._extractByse(dest, partName);
-          if (byseStreams && byseStreams.length > 0) {
-            streams.push(...byseStreams);
+        // 2. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
+        if (dest.includes('ok.ru')) {
+          const extracted = await this._extractOkRu(dest, partName);
+          if (extracted && extracted.length > 0) {
+            okStreams.push(...extracted);
             continue;
           }
         }
 
         // 3. Direct Media File
         if (/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
-          streams.push(new StreamEntity({
+          directStreams.push(new StreamEntity({
             name: this.name,
             title: `${partName} (Direct)`,
             resolution: '1080p',
@@ -267,6 +269,8 @@ class BasketballVideoProvider extends BaseProvider {
           }));
         }
       }
+
+      const streams = [...byseStreams, ...okStreams, ...directStreams];
 
       if (streams.length > 0) {
         this._setCache(this._streamCache, targetUrl, streams);
@@ -329,7 +333,7 @@ class BasketballVideoProvider extends BaseProvider {
         for (const v of metaObj.videos) {
           if (!v.url) continue;
           const label = qualityMap[v.name] || v.name || 'HD';
-          const title = cleanPart ? `${cleanPart} (${label})` : `Full Game (${label})`;
+          const title = cleanPart ? `${cleanPart} (${label}) [OK.ru]` : `Full Game (${label}) [OK.ru]`;
 
           streams.push(new StreamEntity({
             name: this.name,
@@ -348,7 +352,7 @@ class BasketballVideoProvider extends BaseProvider {
       if (metaObj.hlsManifestUrl) {
         streams.push(new StreamEntity({
           name: this.name,
-          title: cleanPart ? `${cleanPart} (Auto HLS)` : 'Full Game (Auto HLS)',
+          title: cleanPart ? `${cleanPart} (Auto HLS) [OK.ru]` : 'Full Game (Auto HLS) [OK.ru]',
           resolution: 'Auto',
           url: metaObj.hlsManifestUrl,
           behaviorHints: {
@@ -450,7 +454,7 @@ class BasketballVideoProvider extends BaseProvider {
       for (const s of decrypted.sources) {
         if (!s.url) continue;
         const resLabel = s.label || (s.height ? `${s.height}p` : '1080p');
-        const streamTitle = cleanPart ? `${cleanPart} (${resLabel})` : `Stream (${resLabel})`;
+        const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Full Game (${resLabel}) [SprintCDN]`;
 
         streams.push(new StreamEntity({
           name: this.name,
@@ -458,7 +462,7 @@ class BasketballVideoProvider extends BaseProvider {
           resolution: resLabel,
           url: s.url,
           behaviorHints: {
-            notWebReady: true,
+            notWebReady: false,
             proxyHeaders: {
               request: {
                 'Origin': `https://${host}`,

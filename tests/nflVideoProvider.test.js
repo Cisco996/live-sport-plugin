@@ -112,7 +112,7 @@ describe('NflVideoProvider', () => {
       const s1080 = streams.find(s => s.resolution === '1080p');
       expect(s1080).toBeDefined();
       expect(s1080.url).toBe('https://vd265.okcdn.ru/video1080.mp4');
-      expect(s1080.title).toBe('Full Game (1080p)');
+      expect(s1080.title).toBe('Full Game (1080p) [OK.ru]');
       expect(s1080.behaviorHints.notWebReady).toBe(false);
       expect(s1080.behaviorHints.proxyHeaders.request['User-Agent']).toBeDefined();
       expect(s1080.behaviorHints.proxyHeaders.request['Referer']).toBe('https://ok.ru/');
@@ -127,7 +127,7 @@ describe('NflVideoProvider', () => {
       const sHls = streams.find(s => s.resolution === 'Auto');
       expect(sHls).toBeDefined();
       expect(sHls.url).toBe('https://vd265.okcdn.ru/master.m3u8');
-      expect(sHls.title).toBe('Full Game (Auto HLS)');
+      expect(sHls.title).toBe('Full Game (Auto HLS) [OK.ru]');
       expect(sHls.behaviorHints.notWebReady).toBe(false);
       expect(sHls.behaviorHints.proxyHeaders.request['Referer']).toBe('https://ok.ru/');
     });
@@ -235,6 +235,48 @@ describe('NflVideoProvider', () => {
       const cached = await provider.resolveStream('https://nfl-video.com/sample-game');
       expect(cached).toHaveLength(1);
       expect(cached[0].url).toBe('https://vd265.okcdn.ru/video.mp4');
+    });
+
+    test('prioritizes Byse (SprintCDN) streams at index 0 over OK.ru streams', async () => {
+      const matchPageHtml = `
+        <div class="content">
+          <div class="links">
+            <a href="https://ok.ru/videoembed/987654321">Watch on OK</a>
+            <a href="https://bysefujedu.com/e/abc123">Watch on Byse</a>
+          </div>
+        </div>
+      `;
+
+      provider._extractOkRu = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Full Game (1080p) [OK.ru]',
+          resolution: '1080p',
+          url: 'https://vd265.okcdn.ru/video.mp4',
+          behaviorHints: { notWebReady: false }
+        })
+      ]);
+
+      provider._extractByse = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Full Game (1080p) [SprintCDN]',
+          resolution: '1080p',
+          url: 'https://edge1.sprintcdn.example/master.m3u8',
+          behaviorHints: { notWebReady: false }
+        })
+      ]);
+
+      provider.fetchPage = {
+        fire: jest.fn().mockResolvedValue(matchPageHtml)
+      };
+
+      const streams = await provider.resolveStream('https://nfl-video.com/dual-stream-game');
+      expect(streams).toHaveLength(2);
+      expect(streams[0].url).toBe('https://edge1.sprintcdn.example/master.m3u8');
+      expect(streams[0].title).toContain('[SprintCDN]');
+      expect(streams[1].url).toBe('https://vd265.okcdn.ru/video.mp4');
+      expect(streams[1].title).toContain('[OK.ru]');
     });
   });
 
