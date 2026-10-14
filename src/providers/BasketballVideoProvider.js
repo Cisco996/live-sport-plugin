@@ -410,16 +410,35 @@ class BasketballVideoProvider extends BaseProvider {
         'Referer': `${parsedUrl.protocol}//${host}/`
       });
 
-      const scriptMatch = html.match(/window\.playback\s*=\s*({[\s\S]*?});/i) ||
-                          html.match(/playback\s*=\s*({[\s\S]*?});/i);
-      if (!scriptMatch) return [];
-
       let playback;
-      try {
-        playback = JSON.parse(scriptMatch[1]);
-      } catch (_) {
-        return [];
+      const scriptMatch = html && (html.match(/window\.playback\s*=\s*({[\s\S]*?});/i) ||
+                                  html.match(/playback\s*=\s*({[\s\S]*?});/i));
+      if (scriptMatch) {
+        try { playback = JSON.parse(scriptMatch[1]); } catch (_) {}
       }
+
+      if (!playback) {
+        const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+        const code = pathParts[pathParts.length - 1];
+        if (code) {
+          const apiRes = await undici.request(`https://${host}/api/videos/${code}/`, {
+            headers: {
+              ...this.defaultHeaders,
+              'Referer': `https://${host}/e/${code}`,
+              'Origin': `https://${host}`,
+              'Accept': 'application/json, text/plain, */*'
+            },
+            headersTimeout: 10000,
+            bodyTimeout: 10000
+          });
+          if (apiRes.statusCode === 200) {
+            const apiJson = await apiRes.body.json();
+            playback = apiJson && apiJson.playback;
+          }
+        }
+      }
+
+      if (!playback) return [];
 
       const decrypted = this._decryptBysePlayback(playback);
       if (!decrypted || !Array.isArray(decrypted.sources)) return [];
