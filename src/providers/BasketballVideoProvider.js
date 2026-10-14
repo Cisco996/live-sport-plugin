@@ -219,7 +219,8 @@ class BasketballVideoProvider extends BaseProvider {
 
       for (let i = 0; i < watchLinks.length; i++) {
         let dest = watchLinks[i][1];
-        const partName = watchLinks[i][2].replace(/<[^>]+>/g, '').trim() || `Part ${i + 1}`;
+        const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+        const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
 
         // Unwrap nbaontv.com bridge wrappers
         if (dest.includes('nbaontv.com')) {

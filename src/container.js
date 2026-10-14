@@ -26,6 +26,7 @@ const IframeDomainRegistry = require('./services/IframeDomainRegistry');
 const PpvStProvider = require('./providers/PpvStProvider');
 const SoccerFullProvider = require('./providers/SoccerFullProvider');
 const BasketballVideoProvider = require('./providers/BasketballVideoProvider');
+const NflVideoProvider = require('./providers/NflVideoProvider');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -67,6 +68,7 @@ container.register({
   ppvStProvider: asClass(PpvStProvider).singleton(),
   soccerFullProvider: asClass(SoccerFullProvider).singleton(),
   basketballVideoProvider: asClass(BasketballVideoProvider).singleton(),
+  nflVideoProvider: asClass(NflVideoProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 
