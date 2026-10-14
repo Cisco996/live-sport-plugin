@@ -389,6 +389,7 @@ class SkTechMatchResolver {
       }
       // Case 3: Akamai / AWS DASH with ClearKey
       else if (parsed.url.includes('.mpd') || api.includes(':')) {
+        const clearkeyObj = api ? SkTechCrypto.formatClearKey(api) : undefined;
         const streamObj = {
           name: '⚡ Direct Stream',
           title: `SK Tech (${serverName ? `${serverName} • DASH` : 'DASH ClearKey'})`,
@@ -401,8 +402,8 @@ class SkTechMatchResolver {
           },
           score: 75
         };
-        if (api) {
-          streamObj.clearkey = SkTechCrypto.formatClearKey(api);
+        if (clearkeyObj) {
+          streamObj.clearkey = clearkeyObj;
         }
         dashStreams.push(streamObj);
       }

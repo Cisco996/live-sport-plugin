@@ -163,37 +163,110 @@ class SkTechCrypto {
   }
 
   /**
-   * Normalizes ClearKey license strings (hex colon pairs or JSON) into W3C base64url key objects
+   * Normalizes ClearKey license strings (hex colon pairs, comma-separated pairs, or JSON)
+   * into W3C base64url key objects.
    * @param {string|Object} license - e.g. "6752015acf084572a08dfe21796f8b45:ff823ddbe5625c35d3e93f0ed4520115"
-   * @returns {{ keyId: string, key: string }|undefined}
+   * @returns {{ keyId: string, key: string, keys?: Array<{ keyId: string, key: string }> }|undefined}
    */
   formatClearKey(license) {
     if (!license) return undefined;
+
+    const isHex = (str) => typeof str === 'string' && /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
+    const toB64Url = (str) => {
+      if (!str || typeof str !== 'string') return '';
+      const trimmed = str.trim();
+      return isHex(trimmed) ? Buffer.from(trimmed, 'hex').toString('base64url') : trimmed;
+    };
+
     if (typeof license === 'object') {
-      if (license.keyId && license.key) return license;
+      if (license.keyId && license.key) {
+        const keys = Array.isArray(license.keys) ? license.keys : [{ keyId: license.keyId, key: license.key }];
+        return { keyId: license.keyId, key: license.key, keys };
+      }
       if (license.keys && Array.isArray(license.keys) && license.keys.length > 0) {
-        return { keyId: license.keys[0].kid, key: license.keys[0].k };
+        const mapped = license.keys.map(k => ({
+          keyId: toB64Url(k.kid || k.keyId),
+          key: toB64Url(k.k || k.key)
+        }));
+        return { keyId: mapped[0].keyId, key: mapped[0].key, keys: mapped };
       }
       return license;
     }
 
-    if (typeof license === 'string' && license.includes(':')) {
-      const [rawKeyId, rawKey] = license.split(':');
-      const isHex = (str) => typeof str === 'string' && /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
-      const keyId = isHex(rawKeyId) ? Buffer.from(rawKeyId, 'hex').toString('base64url') : rawKeyId;
-      const key = isHex(rawKey) ? Buffer.from(rawKey, 'hex').toString('base64url') : rawKey;
-      return { keyId, key };
+    if (typeof license === 'string') {
+      const trimmed = license.trim();
+
+      // Check for JSON first before splitting on colons
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.keys && Array.isArray(parsed.keys) && parsed.keys.length > 0) {
+            const mapped = parsed.keys.map(k => ({
+              keyId: toB64Url(k.kid || k.keyId),
+              key: toB64Url(k.k || k.key)
+            }));
+            return { keyId: mapped[0].keyId, key: mapped[0].key, keys: mapped };
+          }
+          if (parsed.keyId && parsed.key) {
+            return { keyId: toB64Url(parsed.keyId), key: toB64Url(parsed.key), keys: [{ keyId: toB64Url(parsed.keyId), key: toB64Url(parsed.key) }] };
+          }
+        } catch (_) {}
+      }
+
+      // Check for comma-separated multiple key pairs: e.g. key1:val1,key2:val2
+      if (trimmed.includes(',')) {
+        const pairs = trimmed.split(',').map(p => p.trim()).filter(Boolean);
+        const parsedKeys = [];
+        for (const pair of pairs) {
+          if (pair.includes(':')) {
+            const [kId, kVal] = pair.split(':');
+            parsedKeys.push({ keyId: toB64Url(kId), key: toB64Url(kVal) });
+          }
+        }
+        if (parsedKeys.length > 1) {
+          return { keyId: parsedKeys[0].keyId, key: parsedKeys[0].key, keys: parsedKeys };
+        }
+        if (parsedKeys.length === 1) {
+          return { keyId: parsedKeys[0].keyId, key: parsedKeys[0].key };
+        }
+      }
+
+      // Single key:val colon pair
+      if (trimmed.includes(':')) {
+        const [rawKeyId, rawKey] = trimmed.split(':');
+        const keyId = toB64Url(rawKeyId);
+        const key = toB64Url(rawKey);
+        return { keyId, key };
+      }
     }
 
-    try {
-      const parsed = JSON.parse(license);
-      if (parsed.keys && Array.isArray(parsed.keys) && parsed.keys.length > 0) {
-        return { keyId: parsed.keys[0].kid, key: parsed.keys[0].k };
-      }
-      return parsed;
-    } catch (_) {
-      return undefined;
-    }
+    return undefined;
+  }
+
+  /**
+   * Constructs an in-addon DASH manifest proxy URL that injects BaseURL and ClearKey DRM ContentProtection
+   * tags so standard ExoPlayer clients (like Nuvio) can resolve keys and decrypt seamlessly.
+   *
+   * @param {string} streamUrl - Upstream .mpd URL
+   * @param {Object} [clearkeyObj] - Normalized ClearKey object with keyId and key
+   * @param {Object} [headers] - Upstream request headers (Cookie, Referer, User-Agent, Origin)
+   * @returns {string} Relative proxy URL (/api/manifest.mpd?...)
+   */
+  buildDashManifestUrl(streamUrl, clearkeyObj, headers = {}) {
+    if (!streamUrl) return '';
+    const token = clearkeyObj ? Buffer.from(JSON.stringify(clearkeyObj)).toString('base64url') : '';
+    const cookie = headers['Cookie'] || headers['cookie'] || '';
+    const referer = headers['Referer'] || headers['referer'] || '';
+    const origin = headers['Origin'] || headers['origin'] || '';
+    const ua = headers['User-Agent'] || headers['user-agent'] || '';
+
+    let manifestUrl = `/api/manifest.mpd?url=${encodeURIComponent(streamUrl)}`;
+    if (token) manifestUrl += `&token=${encodeURIComponent(token)}`;
+    if (cookie) manifestUrl += `&cookie=${encodeURIComponent(cookie)}`;
+    if (referer) manifestUrl += `&referer=${encodeURIComponent(referer)}`;
+    if (origin) manifestUrl += `&origin=${encodeURIComponent(origin)}`;
+    if (ua) manifestUrl += `&ua=${encodeURIComponent(ua)}`;
+    return manifestUrl;
   }
 }
 

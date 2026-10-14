@@ -16,6 +16,7 @@ const {
   readRck, getRemintCacheKey, remintCache, mergeRemintedUrl, isExpiryStatus, attemptRemint
 } = require('../remint');
 const { rewriteHlsUri } = require('../services/HlsRewriteService');
+const { safeFetch: _safeFetch } = require('../impitClient');
 
 router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
@@ -23,6 +24,7 @@ router.get('/api/manifest', async (req, res) => {
   const origin = req.query.origin || 'https://embed.st';
 
   if (!targetUrl) return res.status(400).send('Missing url');
+  if (targetUrl.includes('.mpd')) return handleDashManifestProxy(req, res);
 
   // Playlist-only proxy (same as WatchFooty / Streamed.pk .ts): this host fetches
   // the m3u8 with the CDN Referer, then the player pulls every media byte from the CDN.
@@ -186,5 +188,140 @@ router.get('/api/manifest', async (req, res) => {
   }
 });
 
+// ─── DASH MPD Manifest Proxy & ClearKey License Support ───────────────────────
+// Injects BaseURL pointing to upstream CDN so media chunks stream directly to player
+// Injects W3C/DASH-IF ClearKey ContentProtection tags pointing to our local license endpoint
+// Result: 0% server bandwidth for media chunks; standard ExoPlayer clients decrypt cleanly.
+
+function parseClearKeyToken(token) {
+  if (!token) return [];
+  let str = token;
+  if (typeof str !== 'string') return [];
+  str = str.trim();
+  // Try base64url decode
+  if (!str.startsWith('{') && !str.includes(':')) {
+    try {
+      str = Buffer.from(str, 'base64url').toString('utf8');
+    } catch (_) {}
+  }
+  // Try JSON
+  if (str.startsWith('{') || str.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(str);
+      const keysArr = parsed.keys || (parsed.keyId ? [parsed] : []);
+      return keysArr.map(k => ({
+        kty: 'oct',
+        kid: k.kid || k.keyId,
+        k: k.k || k.key
+      }));
+    } catch (_) {}
+  }
+  // Try hex colon pairs (e.g. kId1:kVal1,kId2:kVal2)
+  const isHex = (s) => typeof s === 'string' && /^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0;
+  const toB64Url = (s) => isHex(s) ? Buffer.from(s, 'hex').toString('base64url') : s;
+  const pairs = str.split(',').map(p => p.trim()).filter(Boolean);
+  const keys = [];
+  for (const p of pairs) {
+    if (p.includes(':')) {
+      const [kid, k] = p.split(':');
+      keys.push({
+        kty: 'oct',
+        kid: toB64Url(kid.trim()),
+        k: toB64Url(k.trim())
+      });
+    }
+  }
+  return keys;
+}
+
+async function handleDashManifestProxy(req, res) {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('Missing url');
+
+  const token = req.query.token || req.query.keys || '';
+  const referer = req.query.referer || '';
+  const origin = req.query.origin || (referer ? (() => { try { return new URL(referer).origin; } catch (_) { return ''; } })() : '');
+  const cookie = req.query.cookie || '';
+  const ua = req.query.ua || req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+
+  const headers = { 'User-Agent': ua };
+  if (referer) headers['Referer'] = referer;
+  if (origin) headers['Origin'] = origin;
+  if (cookie) headers['Cookie'] = cookie;
+
+  try {
+    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000 });
+    if (!result.ok) {
+      return res.status(result.status).send(`Upstream returned HTTP ${result.status}`);
+    }
+
+    let mpd = await result.text();
+    if (!mpd.includes('<MPD') && !mpd.includes('<mpd')) {
+      return res.status(502).send('Upstream returned non-MPD body');
+    }
+
+    // 1. Inject BaseURL if missing so relative segment URLs resolve to upstream CDN
+    if (!mpd.includes('<BaseURL>')) {
+      try {
+        const upstreamBase = new URL('.', targetUrl).toString();
+        mpd = mpd.replace(/(<MPD[^>]*>)/i, `$1\n  <BaseURL>${upstreamBase}</BaseURL>`);
+      } catch (_) {}
+    }
+
+    // 2. Inject ClearKey ContentProtection if keys are present
+    if (token) {
+      const reqBase = `${req.protocol}://${req.get('host')}`;
+      const licenseUrl = `${reqBase}/api/clearkey/license?token=${encodeURIComponent(token)}`;
+      const ckTags = `
+    <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e" value="ClearKey1.0">
+      <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
+      <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
+    </ContentProtection>
+    <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b" value="ClearKey1.0">
+      <clearkey:Laurl xmlns:clearkey="http://dashif.org/guidelines/clearkey">${licenseUrl}</clearkey:Laurl>
+      <dashif:laurl xmlns:dashif="urn:mpeg:dash:schema:dashif:laurl:2020">${licenseUrl}</dashif:laurl>
+    </ContentProtection>`;
+
+      if (mpd.includes('urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e')) {
+        mpd = mpd.replace(/<ContentProtection[^>]*schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030a7d0e82e"[^>]*>([\s\S]*?<\/ContentProtection>)?/gi, ckTags);
+      } else {
+        mpd = mpd.replace(/(<AdaptationSet[^>]*>)/gi, `$1${ckTags}`);
+      }
+    }
+
+    res.setHeader('Content-Type', 'application/dash+xml; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.send(mpd);
+  } catch (err) {
+    console.error('[ManifestProxy] DASH error:', err.message);
+    return res.status(502).send('Manifest proxy error: ' + err.message);
+  }
+}
+
+router.get('/api/manifest.mpd', handleDashManifestProxy);
+
+router.options(['/api/clearkey/license', '/api/license'], (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.status(204).end();
+});
+
+router.all(['/api/clearkey/license', '/api/license'], (req, res) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+
+  const rawToken = req.query.token || (req.body && req.body.token) || req.query.keys || '';
+  const keys = parseClearKeyToken(rawToken);
+
+  return res.json({
+    keys,
+    type: 'temporary'
+  });
+});
 
 module.exports = router;

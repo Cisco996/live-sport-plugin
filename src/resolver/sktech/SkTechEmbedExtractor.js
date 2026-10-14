@@ -45,6 +45,10 @@ class SkTechEmbedExtractor {
           headers['Referer'] = val;
         } else if (key === 'origin') {
           headers['Origin'] = val;
+        } else if (key === 'cookie') {
+          headers['Cookie'] = val;
+        } else if (key === 'authorization') {
+          headers['Authorization'] = val;
         } else if (key === 'accept') {
           headers['Accept'] = val;
         } else if (key === 'cache-control') {

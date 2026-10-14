@@ -5,6 +5,7 @@ const { rewriteHlsUri } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
+const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -208,6 +209,8 @@ function parseManifestProxyUrl(rawUrl) {
       targetUrl: urlObj.searchParams.get('url') || rawUrl,
       referer: urlObj.searchParams.get('referer') || '',
       origin: urlObj.searchParams.get('origin') || '',
+      cookie: urlObj.searchParams.get('cookie') || '',
+      ua: urlObj.searchParams.get('ua') || '',
     };
   } catch (_) {
     return null;
@@ -433,6 +436,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
     let targetUrl = s.url;
     let referer = '';
     let origin = '';
+    let cookie = '';
+    let customUa = '';
     // If the stream is routed through our manifest proxy, we extract the true upstream URL to ping
     if (targetUrl.includes('/api/manifest')) {
       const proxyInfo = parseManifestProxyUrl(targetUrl);
@@ -440,25 +445,35 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         targetUrl = proxyInfo.targetUrl;
         referer = proxyInfo.referer;
         origin = proxyInfo.origin;
+        cookie = proxyInfo.cookie;
+        customUa = proxyInfo.ua;
       }
     }
 
     try {
-      if (!referer && s.behaviorHints && s.behaviorHints.proxyHeaders && s.behaviorHints.proxyHeaders.request) {
-        referer = s.behaviorHints.proxyHeaders.request.Referer || '';
+      const proxyReq = (s.behaviorHints && s.behaviorHints.proxyHeaders && s.behaviorHints.proxyHeaders.request) || {};
+      if (!referer) {
+        referer = proxyReq['Referer'] || proxyReq['referer'] || '';
       }
       if (!origin && referer) {
         try { origin = new URL(referer).origin; } catch (_) {}
+      }
+      if (!origin) {
+        origin = proxyReq['Origin'] || proxyReq['origin'] || '';
+      }
+      if (!cookie) {
+        cookie = proxyReq['Cookie'] || proxyReq['cookie'] || '';
       }
 
       let res;
       let bodySample = '';
 
       const reqHeaders = {
-        'User-Agent': (s.behaviorHints && s.behaviorHints.proxyHeaders && s.behaviorHints.proxyHeaders.request && s.behaviorHints.proxyHeaders.request['User-Agent']) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'User-Agent': customUa || proxyReq['User-Agent'] || proxyReq['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
         'Referer': referer
       };
       if (origin) reqHeaders['Origin'] = origin;
+      if (cookie) reqHeaders['Cookie'] = cookie;
 
       // A verification ping is one sample of a flaky path: a CDN edge mid-
       // rotation, a reset socket, a 503 under load. Believing that single
@@ -529,13 +544,15 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           // the latency of a stream that genuinely refuses this client.
           if (guess && guess !== referer) {
             console.log(`[Filter] ${res.status} with ${referer ? `refused referer ${referer}` : 'no referer'}; retrying once with ${guess}`);
+            const retryHeaders = {
+              'User-Agent': reqHeaders['User-Agent'],
+              'Referer': guess,
+              'Origin': guess.replace(/\/$/, ''),
+            };
+            if (reqHeaders['Cookie']) retryHeaders['Cookie'] = reqHeaders['Cookie'];
             const r2 = await _safeFetch(targetUrl, {
               method: 'GET',
-              headers: {
-                'User-Agent': reqHeaders['User-Agent'],
-                'Referer': guess,
-                'Origin': guess.replace(/\/$/, ''),
-              },
+              headers: retryHeaders,
               timeoutMs: VERIFY_TIMEOUT_MS,
               attempts: 1,
             });
@@ -928,6 +945,12 @@ async function handleStream(type, id, config) {
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
+
+    // If it's a DASH stream with ClearKey DRM, route it through our manifest proxy so ExoPlayer can decrypt
+    if (s.url && s.url.includes('.mpd') && s.clearkey && !s.url.includes('/api/manifest')) {
+      s.externalUrl = s.url;
+      s.url = SkTechCrypto.buildDashManifestUrl(s.url, s.clearkey, s.behaviorHints.proxyHeaders?.request || {});
+    }
     
     // If it's a direct m3u8 stream and not routed through our proxy, mark it notWebReady
     if (s.url && s.url.includes('.m3u8') && !s.url.includes('/api/manifest')) {
