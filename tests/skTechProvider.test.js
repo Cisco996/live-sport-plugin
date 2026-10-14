@@ -211,6 +211,7 @@ describe('SK Tech TV Dual-Pillar Resolver & Provider', () => {
 
       global.fetch = jest.fn()
         .mockResolvedValueOnce({ ok: true, text: async () => 'enc_categories' })
+        .mockResolvedValueOnce({ ok: true, text: async () => '#EXTM3U\n#EXTINF:-1,SONY LIVE\nhttps://cdn.example.com/sony.m3u8' })
         .mockResolvedValueOnce({ ok: true, text: async () => 'enc_channels' });
 
       const channels = await channelResolver.fetchChannels();

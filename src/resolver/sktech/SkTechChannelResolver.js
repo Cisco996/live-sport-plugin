@@ -61,16 +61,11 @@ class SkTechChannelResolver {
       // Tier 1: Custom channel group definitions (channels/<id>.txt)
       // ────────────────────────────────────────────────────────────────────────
       if (type === 'custom' && api) {
-        const isSportsGroup = /sport|raw|smackdown|wwe/i.test(name) || api.includes('U1BPUlRTIFdPUkxE');
-        const isRegionalGroup = /hindi|हिंदी|tamil|தமிழ்|telugu|తెలుగు|punjabi|ਪੰਜਾਬੀ|bangla|বাংলা|bhojpuri|भोजपुरी|odia|ଓଡ଼ିଆ|pakistan/i.test(name);
-        const isEntertainmentGroup = /movie|kids|news|kapil/i.test(name);
-
-        if (isSportsGroup || isRegionalGroup || isEntertainmentGroup) {
-          try {
-            const subChannels = await this.fetchCustomChannelGroup(api);
-            const groupTag = isSportsGroup
-              ? 'Sports Channels'
-              : (isRegionalGroup ? name : 'Entertainment');
+        try {
+          const subChannels = await this.fetchCustomChannelGroup(api);
+          if (subChannels && subChannels.length > 0) {
+            const isSportsGroup = /sport|raw|smackdown|wwe/i.test(name) || api.includes('U1BPUlRTIFdPUkxE');
+            const groupTag = isSportsGroup ? 'Sports Channels' : name;
 
             for (let j = 0; j < subChannels.length; j++) {
               const sub = subChannels[j];
@@ -86,47 +81,25 @@ class SkTechChannelResolver {
                 group: groupTag
               });
             }
-            continue;
-          } catch (_) {}
-        }
-
-        // Generic custom group item fallback
-        channels.push({
-          id: `sktech_ch_custom_${i}`,
-          title: name,
-          category: 'networks',
-          kickoff: 0,
-          type: 'custom',
-          logo,
-          poster: logo,
-          api,
-          group: 'Live TV'
-        });
+          }
+        } catch (_) {}
       }
       // ────────────────────────────────────────────────────────────────────────
       // Tier 2: M3U Playlists (Direct feeds, multi-channel bouquets, encrypted workers)
       // ────────────────────────────────────────────────────────────────────────
       else if (type === 'm3u' && api) {
-        const isBigBoss = /boss/i.test(name) || api.includes('[rts]') || api.includes('alpha-circuit.workers.dev');
-        const isSunNxt = /sun\s*nxt/i.test(name) || api.includes('sunxt.m3u');
-        const isCricHd = /cric\s*hd/i.test(name) || api.includes('CricketLive');
-        const isSportsBouquet = /sports\s*event|fc\s*live/i.test(name);
-        const isCountryBouquet = /uk\s*tv|canada\s*tv|spain\s*tv|mexico\s*tv|arabic\s*tv|nz&au|world\s*news/i.test(name);
-        const isUsa = /usa\s*live|usa\s*tv|prime\s*usa/i.test(name);
+        try {
+          let defaultGroup = name;
+          if (/sun\s*nxt/i.test(name) || api.includes('sunxt.m3u')) defaultGroup = 'Sun NXT';
+          else if (/cric\s*hd/i.test(name) || api.includes('CricketLive')) defaultGroup = 'Cricket';
+          else if (/sports\s*event|fc\s*live/i.test(name)) defaultGroup = 'Sports Channels';
+          else if (/boss/i.test(name)) defaultGroup = 'Big Boss';
+          else if (/usa\s*live|usa\s*tv|prime\s*usa/i.test(name)) defaultGroup = 'USA TV';
 
-        if (isBigBoss || isSunNxt || isCricHd || isSportsBouquet || isCountryBouquet || isUsa) {
-          try {
-            let defaultGroup = name;
-            if (isSunNxt) defaultGroup = 'Sun NXT';
-            else if (isCricHd) defaultGroup = 'Cricket';
-            else if (isSportsBouquet) defaultGroup = 'Sports Channels';
-            else if (isBigBoss) defaultGroup = 'Big Boss';
-            else if (isUsa) defaultGroup = 'USA TV';
-
-            const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
-
-            // Limit massive playlists (e.g. 5,600+ USA channels) to top 300 to protect memory and responsiveness
-            const maxChannels = subChannels.length > 500 ? 500 : subChannels.length;
+          const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
+          if (subChannels && subChannels.length > 0) {
+            // Limit massive playlists (e.g. 5,600+ USA channels) to top 250 to protect memory and responsiveness
+            const maxChannels = Math.min(subChannels.length, 250);
 
             for (let j = 0; j < maxChannels; j++) {
               const sub = subChannels[j];
@@ -145,22 +118,8 @@ class SkTechChannelResolver {
                 group: sub.group || defaultGroup
               });
             }
-            continue;
-          } catch (_) {}
-        }
-
-        // Generic single M3U stream entry fallback
-        channels.push({
-          id: `sktech_ch_m3u_${i}`,
-          title: name,
-          category: 'networks',
-          kickoff: 0,
-          type: 'm3u',
-          logo,
-          poster: logo,
-          api,
-          group: 'Live TV'
-        });
+          }
+        } catch (_) {}
       }
     }
 
@@ -287,16 +246,25 @@ class SkTechChannelResolver {
         const mergedHeaders = { ...currentHeaders, ...parsed.headers };
 
         if (streamUrl) {
-          channels.push({
-            title: currentTitle || `Channel ${channels.length + 1}`,
-            logo: currentLogo,
-            group: currentGroup,
-            language: currentLang,
-            url: streamUrl,
-            headers: mergedHeaders,
-            drmScheme: currentDrmScheme || parsed.drmScheme,
-            drmLicense: currentDrmLicense || parsed.drmLicense
-          });
+          const t = currentTitle || '';
+          const g = currentGroup || '';
+          const isRadio = g.startsWith('Radio_') || /\b(radio|fm|podcast)\b/i.test(t) || /\bradio\b/i.test(g);
+          const isOfflineOrGeo = /\[geo-blocked\]|\[not 24\/7\]|\(offline\)|\[offline\]|\(unavailable\)|\[dead\]|\[off air\]|\[not working\]|\[testing\]/i.test(t);
+          const isPlaceholder = /download sk tech|placeholder/i.test(t);
+          const isDeadHost = /aalmaruf1702/i.test(streamUrl);
+
+          if (!isRadio && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
+            channels.push({
+              title: currentTitle || `Channel ${channels.length + 1}`,
+              logo: currentLogo,
+              group: currentGroup,
+              language: currentLang,
+              url: streamUrl,
+              headers: mergedHeaders,
+              drmScheme: currentDrmScheme || parsed.drmScheme,
+              drmLicense: currentDrmLicense || parsed.drmLicense
+            });
+          }
         }
 
         // Reset per-channel state

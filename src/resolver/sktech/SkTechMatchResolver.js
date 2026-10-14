@@ -8,6 +8,7 @@ const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 const DYNAMIC_EVENT_FEEDS = [
   { label: 'FanCode', url: 'https://raw.githubusercontent.com/doctor-8trange/zyphx8/refs/heads/main/data/fancode.m3u' },
+  { label: 'FanCode', url: 'https://jabra-fan2.saqlainhaider8198.workers.dev/playlist.m3u' },
   { label: 'Sony LIV', url: 'https://nonyliv.saqlainhaider8198.workers.dev/nony2.m3u' }
 ];
 
@@ -22,17 +23,16 @@ class SkTechMatchResolver {
   /**
    * Helper to normalize category names into canonical Nuvio sport categories
    */
-  normalizeCategory(cat) {
-    if (!cat) return 'other';
-    const c = String(cat).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (c.includes('soccer') || c.includes('football') || c.includes('laliga') || c.includes('seriea') || c.includes('bundesliga') || c.includes('premierleague')) return 'football';
-    if (c.includes('cricket') || c.includes('ipl') || c.includes('t20')) return 'cricket';
-    if (c.includes('basketball') || c.includes('nba')) return 'basketball';
-    if (c.includes('boxing') || c.includes('wwe') || c.includes('aew') || c.includes('ufc') || c.includes('fight') || c.includes('mma') || c.includes('tna')) return 'mma';
-    if (c.includes('motogp') || c.includes('formula1') || c.includes('f1') || c.includes('racing') || c.includes('rally') || c.includes('cycling')) return 'motorsport';
-    if (c.includes('tennis') || c.includes('atp') || c.includes('wta')) return 'tennis';
-    if (c.includes('baseball') || c.includes('mlb')) return 'baseball';
-    if (c.includes('hockey') || c.includes('nhl')) return 'hockey';
+  normalizeCategory(cat, title = '') {
+    const combined = `${cat || ''} ${title || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (combined.includes('soccer') || combined.includes('football') || combined.includes('laliga') || combined.includes('seriea') || combined.includes('bundesliga') || combined.includes('premierleague') || combined.includes('uefa')) return 'football';
+    if (combined.includes('cricket') || combined.includes('ipl') || combined.includes('t20') || combined.includes('odi') || combined.includes('namibia') || combined.includes('uganda') || combined.includes('champions')) return 'cricket';
+    if (combined.includes('basketball') || combined.includes('nba')) return 'basketball';
+    if (combined.includes('boxing') || combined.includes('wwe') || combined.includes('aew') || combined.includes('ufc') || combined.includes('fight') || combined.includes('mma') || combined.includes('tna')) return 'mma';
+    if (combined.includes('motogp') || combined.includes('formula1') || combined.includes('f1') || combined.includes('racing') || combined.includes('rally') || combined.includes('cycling')) return 'motorsport';
+    if (combined.includes('tennis') || combined.includes('atp') || combined.includes('wta')) return 'tennis';
+    if (combined.includes('baseball') || combined.includes('mlb')) return 'baseball';
+    if (combined.includes('hockey') || combined.includes('nhl')) return 'hockey';
     return 'other';
   }
 
@@ -190,21 +190,27 @@ class SkTechMatchResolver {
             const parsed = SkTechEmbedExtractor.parseDelimited(line);
             if (parsed.url) {
               const clean = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
-              const cat = this.normalizeCategory(curMeta.group);
+              const cat = this.normalizeCategory(curMeta.group, clean);
               const mapKey = `${cat}:${clean.toLowerCase()}`;
               const feedKey = feed.label.toLowerCase().replace(/[^a-z0-9]/g, '');
-              const srcId = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${(curMeta.lang || 'def').toLowerCase()}`;
+
+              const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p)\b/i);
+              const resTag = resMatch ? resMatch[1].toUpperCase() : 'HD';
+              const srcId = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${resTag}_${(curMeta.lang || 'def').toLowerCase()}`;
+
+              const streamTitle = curMeta.lang && curMeta.lang.toLowerCase() !== 'english'
+                ? `SK Tech (${feed.label} ${resTag} - ${curMeta.lang})`
+                : (resTag !== 'HD' ? `SK Tech (${feed.label} ${resTag})` : `SK Tech (${feed.label})`);
 
               const srcObj = {
                 source: 'sktech',
                 id: srcId,
-                channelName: curMeta.lang ? `${feed.label} (${curMeta.lang})` : feed.label,
+                channelName: `${feed.label} (${resTag})`,
+                resolution: resTag,
                 type: 'fancode_direct',
                 streamUrl: parsed.url,
                 streamHeaders: { ...curOpts, ...parsed.headers },
-                streamTitle: curMeta.lang && curMeta.lang.toLowerCase() !== 'english'
-                  ? `SK Tech (${feed.label} ${curMeta.lang})`
-                  : `SK Tech (${feed.label})`
+                streamTitle
               };
 
               this._eventStreamCache.set(srcId, srcObj);
