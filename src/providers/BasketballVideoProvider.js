@@ -204,6 +204,7 @@ class BasketballVideoProvider extends BaseProvider {
 
     try {
       const html = await this.fetchPage.fire(targetUrl);
+      if (!html) return [];
       const bodyMatch = html.match(/<!--\s*<body>\s*-->([\s\S]*?)<!--\s*<\/body>\s*-->/i);
       const content = bodyMatch ? bodyMatch[1] : html;
 
@@ -288,6 +289,7 @@ class BasketballVideoProvider extends BaseProvider {
       }
 
       const html = await this.fetchPage.fire(normUrl, { 'Referer': 'https://nbaontv.com/' });
+      if (!html) return [];
       const optionsMatch = html.match(/data-options="([^"]+)"/i) ||
                            html.match(/data-module="OKVideo"\s+data-options="([^"]+)"/i);
 
@@ -315,6 +317,13 @@ class BasketballVideoProvider extends BaseProvider {
         'mobile': '144p'
       };
 
+      const okProxyHeaders = {
+        request: {
+          'User-Agent': this.defaultHeaders['User-Agent'],
+          'Referer': 'https://ok.ru/'
+        }
+      };
+
       if (Array.isArray(metaObj.videos)) {
         for (const v of metaObj.videos) {
           if (!v.url) continue;
@@ -327,7 +336,8 @@ class BasketballVideoProvider extends BaseProvider {
             resolution: label,
             url: v.url,
             behaviorHints: {
-              notWebReady: false
+              notWebReady: false,
+              proxyHeaders: okProxyHeaders
             }
           }));
         }
@@ -341,7 +351,8 @@ class BasketballVideoProvider extends BaseProvider {
           resolution: 'Auto',
           url: metaObj.hlsManifestUrl,
           behaviorHints: {
-            notWebReady: false
+            notWebReady: false,
+            proxyHeaders: okProxyHeaders
           }
         }));
       }

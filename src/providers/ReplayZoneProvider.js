@@ -438,19 +438,95 @@ class ReplayZoneProvider {
      * handles the parallel fetching on its own, delivering full speed at zero server bandwidth.
      */
     async _resolveOkRu(url, partName = '') {
-        // Normalise embed URL: ok.ru/video/ID → ok.ru/videoembed/ID so it loads the embeddable player
-        let embedUrl = url;
-        if (/ok\.ru\/video\/\d+/.test(url)) {
-            embedUrl = url.replace('/video/', '/videoembed/');
-        }
+        try {
+            let embedUrl = url;
+            if (/ok\.ru\/video\/\d+/.test(url)) {
+                embedUrl = url.replace('/video/', '/videoembed/');
+            }
+            if (embedUrl.startsWith('//')) {
+                embedUrl = `https:${embedUrl}`;
+            }
 
-        const label = partName.trim() ? `${partName.trim()} (ok.ru)` : 'ok.ru Player';
-        return [{
-            name: 'RZ (External)',
-            title: label,
-            externalUrl: embedUrl,
-            _rzWeb: true
-        }];
+            const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+            const res = await undici.request(embedUrl, {
+                headers: {
+                    'User-Agent': userAgent,
+                    'Referer': 'https://ok.ru/'
+                },
+                headersTimeout: 10000,
+                bodyTimeout: 10000
+            });
+            if (res.statusCode !== 200) return [];
+
+            const html = await res.body.text();
+            const optionsMatch = html.match(/data-options="([^"]+)"/i) ||
+                                 html.match(/data-module="OKVideo"\s+data-options="([^"]+)"/i);
+            if (!optionsMatch) return [];
+
+            const rawJson = optionsMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+            const parsed = JSON.parse(rawJson);
+            const meta = parsed.flashvars && parsed.flashvars.metadata;
+            let metaObj = meta;
+            if (typeof meta === 'string') {
+                try { metaObj = JSON.parse(meta); } catch (_) {}
+            }
+            if (!metaObj) return [];
+
+            const streams = [];
+            const cleanPart = partName.trim();
+            const qualityMap = {
+                'full': '1080p',
+                'hd': '720p',
+                'sd': '480p',
+                'low': '360p',
+                'lowest': '240p',
+                'mobile': '144p'
+            };
+
+            const okProxyHeaders = {
+                request: {
+                    'User-Agent': userAgent,
+                    'Referer': 'https://ok.ru/'
+                }
+            };
+
+            if (Array.isArray(metaObj.videos)) {
+                for (const v of metaObj.videos) {
+                    if (!v.url) continue;
+                    const label = qualityMap[v.name] || v.name || 'HD';
+                    const title = cleanPart ? `${cleanPart} (${label})` : `Replay (${label})`;
+
+                    streams.push({
+                        name: 'ReplayZone',
+                        title,
+                        resolution: label,
+                        url: v.url,
+                        behaviorHints: {
+                          notWebReady: false,
+                          proxyHeaders: okProxyHeaders
+                        }
+                    });
+                }
+            }
+
+            if (metaObj.hlsManifestUrl) {
+                streams.push({
+                    name: 'ReplayZone',
+                    title: cleanPart ? `${cleanPart} (Auto HLS)` : 'Replay (Auto HLS)',
+                    resolution: 'Auto',
+                    url: metaObj.hlsManifestUrl,
+                    behaviorHints: {
+                        notWebReady: false,
+                        proxyHeaders: okProxyHeaders
+                    }
+                });
+            }
+
+            return streams;
+        } catch (err) {
+            console.warn(`[ReplayZone] Error extracting OK.ru ${url}:`, err.message);
+            return [];
+        }
     }
 
     /**
