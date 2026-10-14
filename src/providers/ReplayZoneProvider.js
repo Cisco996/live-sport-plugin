@@ -39,6 +39,12 @@ class ReplayZoneProvider {
                 if (!lines[1].startsWith('~')) continue;
                 const metaParts = lines[1].replace(/^~\s*/, '').split('\t');
                 const category = (metaParts[0] || 'football').toLowerCase();
+
+                // Drop football replays: 100% of football entries in upstream replays.txt
+                // are soccerfull.net links. SoccerFullProvider is our dedicated provider
+                // that handles football replays with direct, high-quality 1080p CDN extraction.
+                if (category === 'football' || category === 'soccer') continue;
+
                 const league = metaParts[1] || '';
                 const thumbnail = metaParts[2] || '';
                 const dateStr = metaParts[3] || '';
@@ -53,6 +59,7 @@ class ReplayZoneProvider {
                     const type = (parts[1] || '').trim().toLowerCase();
                     const sourceUrl = (parts[2] || '').trim();
                     if (!/^https?:\/\//i.test(sourceUrl)) continue;
+                    if (sourceUrl.includes('soccerfull.net')) continue;
                     sources.push({
                         source: this.sourceName,
                         id: sourceUrl, // URL doubles as the resolveStream key
@@ -93,6 +100,11 @@ class ReplayZoneProvider {
         url = url || (srcObj && srcObj.url) || '';
         if (!url) return [];
 
+        const cat = (category || '').toLowerCase();
+        if (cat === 'football' || cat === 'soccer' || url.includes('soccerfull.net')) {
+            return [];
+        }
+
         // 1. Direct Byse embed (e.g. bysesukior.com, bysefujedu.com)
         if (this._isByseUrl(url)) {
             const streams = await this.extractByse(url, partName);
@@ -109,13 +121,7 @@ class ReplayZoneProvider {
             return [this._buildDirectStream(url, partName)];
         }
 
-        // 4. Soccerfull.net page embed
-        if (url.includes('soccerfull.net')) {
-            const streams = await this.extractSoccerfull(url, partName);
-            if (streams && streams.length > 0) return streams;
-        }
-
-        // 5. Dailymotion embed
+        // 4. Dailymotion embed
         if (this._isDailymotionUrl(url)) {
             return await this._resolveDailymotion(url, partName);
         }
