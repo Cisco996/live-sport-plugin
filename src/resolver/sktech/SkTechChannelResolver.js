@@ -53,6 +53,7 @@ class SkTechChannelResolver {
       if (!item || item.visible === false) continue;
 
       const name = (item.name || `Channel ${i + 1}`).trim();
+      if (/^test$/i.test(name) || /^demo$/i.test(name)) continue;
       const logo = item.logo || '';
       const type = item.type || 'm3u';
       const api = item.api || '';
@@ -253,7 +254,7 @@ class SkTechChannelResolver {
           const isRadio = g.startsWith('Radio_') || /\b(radio|fm|podcast)\b/i.test(t) || /\bradio\b/i.test(g);
           const isOfflineOrGeo = /\[geo-blocked\]|\[not 24\/7\]|\(offline\)|\[offline\]|\(unavailable\)|\[dead\]|\[off air\]|\[not working\]|\[testing\]/i.test(t);
           const isPlaceholder = /download sk tech|placeholder/i.test(t);
-          const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com/i.test(streamUrl) || /token=expired/i.test(streamUrl);
+          const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com|hoast-plm\.shop/i.test(streamUrl) || /token=expired/i.test(streamUrl);
 
           if (!isRadio && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
             channels.push({
