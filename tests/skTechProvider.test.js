@@ -151,7 +151,10 @@ describe('SK Tech TV Dual-Pillar Resolver & Provider', () => {
       expect(streams[0].url).toContain('amagi.tv');
       expect(streams[1].title).toContain('Server 3 R2');
       expect(streams[2].title).toContain('Server 1 DASH');
-      expect(streams[2].clearkey).toBe('14eeabf30c14b7fbf3008c03099ce011:17d2ac8dbc5429bd70af3433aa12158d');
+      expect(streams[2].clearkey).toEqual({
+        keyId: 'FO6r8wwUt_vzAIwDCZzgEQ',
+        key: 'F9KsjbxUKb1wrzQzqhIVjQ'
+      });
 
       // Verify Zero Server Bandwidth: URLs are direct CDNs with proxyHeaders
       for (const s of streams) {
@@ -375,6 +378,37 @@ https://cdn.example.com/sony1.m3u8|User-Agent=ExoPlayer
 
       const isSame = aggregator.isSameEvent(m1, m2);
       expect(isSame).toBe(true);
+    });
+
+    test('formatClearKey normalizes hex colon pairs into W3C base64url keys', () => {
+      const res = skCrypto.formatClearKey('6752015acf084572a08dfe21796f8b45:ff823ddbe5625c35d3e93f0ed4520115');
+      expect(res).toEqual({
+        keyId: 'Z1IBWs8IRXKgjf4heW-LRQ',
+        key: '_4I92-ViXDXT6T8O1FIBFQ'
+      });
+    });
+
+    test('cleanEventTitle strips language prefixes, quality suffixes, and commentary tags', () => {
+      expect(matchResolver.cleanEventTitle('ENG | India vs West Indies')).toBe('India vs West Indies');
+      expect(matchResolver.cleanEventTitle('[HINDI] India vs West Indies (1080p)')).toBe('India vs West Indies');
+      expect(matchResolver.cleanEventTitle('Tamil | India vs West Indies - Hindi')).toBe('India vs West Indies');
+      expect(matchResolver.cleanEventTitle('India vs West Indies [FHD]')).toBe('India vs West Indies');
+    });
+
+    test('resolveChannelStream falls back to direct URL if pro/ resolution returns empty', async () => {
+      jest.spyOn(matchResolver, 'resolveMatchStreams').mockResolvedValueOnce([]);
+      const channel = {
+        id: 'sktech_jtv_1',
+        title: '|Hindi| Tata Play Movies',
+        url: 'https://cdn.tataplay.com/live/movie.m3u8',
+        links: 'pro/expired_token.txt',
+        group: 'Tata Play'
+      };
+
+      const streams = await channelResolver.resolveChannelStream(channel);
+      expect(streams).toHaveLength(1);
+      expect(streams[0].url).toBe('https://cdn.tataplay.com/live/movie.m3u8');
+      expect(streams[0].title).toContain('Tata Play Movies');
     });
   });
 });

@@ -161,6 +161,40 @@ class SkTechCrypto {
       return trimmed;
     }
   }
+
+  /**
+   * Normalizes ClearKey license strings (hex colon pairs or JSON) into W3C base64url key objects
+   * @param {string|Object} license - e.g. "6752015acf084572a08dfe21796f8b45:ff823ddbe5625c35d3e93f0ed4520115"
+   * @returns {{ keyId: string, key: string }|undefined}
+   */
+  formatClearKey(license) {
+    if (!license) return undefined;
+    if (typeof license === 'object') {
+      if (license.keyId && license.key) return license;
+      if (license.keys && Array.isArray(license.keys) && license.keys.length > 0) {
+        return { keyId: license.keys[0].kid, key: license.keys[0].k };
+      }
+      return license;
+    }
+
+    if (typeof license === 'string' && license.includes(':')) {
+      const [rawKeyId, rawKey] = license.split(':');
+      const isHex = (str) => typeof str === 'string' && /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
+      const keyId = isHex(rawKeyId) ? Buffer.from(rawKeyId, 'hex').toString('base64url') : rawKeyId;
+      const key = isHex(rawKey) ? Buffer.from(rawKey, 'hex').toString('base64url') : rawKey;
+      return { keyId, key };
+    }
+
+    try {
+      const parsed = JSON.parse(license);
+      if (parsed.keys && Array.isArray(parsed.keys) && parsed.keys.length > 0) {
+        return { keyId: parsed.keys[0].kid, key: parsed.keys[0].k };
+      }
+      return parsed;
+    } catch (_) {
+      return undefined;
+    }
+  }
 }
 
 module.exports = new SkTechCrypto();

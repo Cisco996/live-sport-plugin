@@ -93,8 +93,8 @@ https://livetv.example/ipl.m3u8|User-Agent=CustomUA/1.0&Referer=https://example.
       expect(streams).toHaveLength(1);
       expect(streams[0].url).toBe('https://livestream.example/suntv.mpd');
       expect(streams[0].clearkey).toEqual({
-        keyId: '6752015acf084572a08dfe21796f8b45',
-        key: 'ff823ddbe5625c35d3e93f0ed4520115'
+        keyId: 'Z1IBWs8IRXKgjf4heW-LRQ',
+        key: '_4I92-ViXDXT6T8O1FIBFQ'
       });
       expect(streams[0].behaviorHints.proxyHeaders.request['User-Agent']).toBe('TestUA/1.0');
     });

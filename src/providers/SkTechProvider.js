@@ -3,7 +3,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { matchResolver, channelResolver } = require('../resolver/sktech');
+const { matchResolver, channelResolver, crypto: skCrypto } = require('../resolver/sktech');
 
 /**
  * SkTechProvider
@@ -138,7 +138,8 @@ class SkTechProvider extends BaseProvider {
                 Referer: 'https://fancode.com/'
               }
             }
-          }
+          },
+          clearkey: eventStream.clearkey ? skCrypto.formatClearKey(eventStream.clearkey) : undefined
         })];
       }
 

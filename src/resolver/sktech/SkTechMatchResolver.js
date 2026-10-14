@@ -37,16 +37,23 @@ class SkTechMatchResolver {
   }
 
   /**
-   * Cleans raw M3U titles by stripping language tags, emojis, and brackets
+   * Cleans raw M3U titles by stripping language tags, quality markers, emojis, and brackets
    */
   cleanEventTitle(rawTitle, tvgName = '') {
     let title = (tvgName && /\bvs\b/i.test(tvgName)) ? tvgName : (rawTitle || tvgName || '');
-    title = title.replace(/^(?:ENG|HIN|BEN|TAM|TEL|MAL|KAN|MAR|GUJ|PUN|URD|SPA|POR|ARA)\s*\|\s*/i, '');
+    // Strip language/commentary prefixes: e.g. "ENG |", "HIN |", "[HINDI]", "Tamil |"
+    title = title.replace(/^[A-Za-z]{2,8}\s*\|\s*/i, '');
+    title = title.replace(/^\[[A-Za-z\s]+\]\s*/i, '');
+    // Strip emojis
     title = title.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]\s*/u, '');
     title = title.replace(/^\[[^\]]+\]\s*/, '');
+    // Strip resolution and quality tags: e.g. "1080p", "720p", "(HD)", "[FHD]", "4K"
+    title = title.replace(/\s*([\[(]?(?:4K|UHD|FHD|HD|1080p?|720p?|540p?|480p?|360p?)[\])]?)\s*$/i, '');
+    // Strip date/match-day suffixes
     title = title.replace(/\s*-\s*(?:MD\s*\d+\s*-\s*)?\d{1,2}\s+[A-Za-z]+\s+\d{4}.*$/i, '');
     title = title.replace(/\s*\[LIVE\].*$/i, '');
-    title = title.replace(/\s*\|\s*(?:Español|English|Hindi).*$/i, '');
+    // Strip trailing language tags: e.g. "| Hindi", "(English)", "- Hindi"
+    title = title.replace(/\s*[|\-(]\s*(?:Español|Spanish|English|Hindi|Bengali|Tamil|Telugu|Marathi|Kannada|Malayalam|Arabic)[^)]*\)?\s*$/i, '');
     title = title.replace(/\s+\d+\s*\([^)]+\)$/, '');
     title = title.replace(/\s+Vs\s+/i, ' vs ').trim();
     return title;
@@ -191,7 +198,7 @@ class SkTechMatchResolver {
             if (parsed.url) {
               const clean = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
               const cat = this.normalizeCategory(curMeta.group, clean);
-              const mapKey = `${cat}:${clean.toLowerCase()}`;
+              const mapKey = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
               const feedKey = feed.label.toLowerCase().replace(/[^a-z0-9]/g, '');
 
               const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p)\b/i);
@@ -262,7 +269,39 @@ class SkTechMatchResolver {
       this.fetchDynamicM3uMatches().catch(() => [])
     ]);
 
-    return [...eventsTxtMatches, ...dynamicM3uMatches];
+    const unifiedMap = new Map();
+    const result = [];
+
+    const toKey = (cat, title) => `${cat || 'other'}:${this.cleanEventTitle(title).toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+    for (const m of eventsTxtMatches) {
+      const key = toKey(m.category, m.title);
+      unifiedMap.set(key, m);
+      result.push(m);
+    }
+
+    for (const m of dynamicM3uMatches) {
+      const key = toKey(m.category, m.title);
+      if (unifiedMap.has(key)) {
+        const existing = unifiedMap.get(key);
+        if (!existing.sources) {
+          existing.sources = [{
+            source: 'sktech',
+            id: existing.linkPath,
+            channelName: existing.title,
+            type: 'fixture'
+          }];
+        }
+        if (m.sources && m.sources.length > 0) {
+          existing.sources.push(...m.sources);
+        }
+      } else {
+        unifiedMap.set(key, m);
+        result.push(m);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -362,8 +401,8 @@ class SkTechMatchResolver {
           },
           score: 75
         };
-        if (api && api.includes(':')) {
-          streamObj.clearkey = api;
+        if (api) {
+          streamObj.clearkey = SkTechCrypto.formatClearKey(api);
         }
         dashStreams.push(streamObj);
       }

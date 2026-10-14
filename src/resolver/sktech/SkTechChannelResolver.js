@@ -251,7 +251,7 @@ class SkTechChannelResolver {
           const isRadio = g.startsWith('Radio_') || /\b(radio|fm|podcast)\b/i.test(t) || /\bradio\b/i.test(g);
           const isOfflineOrGeo = /\[geo-blocked\]|\[not 24\/7\]|\(offline\)|\[offline\]|\(unavailable\)|\[dead\]|\[off air\]|\[not working\]|\[testing\]/i.test(t);
           const isPlaceholder = /download sk tech|placeholder/i.test(t);
-          const isDeadHost = /aalmaruf1702/i.test(streamUrl);
+          const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com/i.test(streamUrl) || /token=expired/i.test(streamUrl);
 
           if (!isRadio && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
             channels.push({
@@ -347,17 +347,9 @@ class SkTechChannelResolver {
       const parsed = SkTechEmbedExtractor.parseDelimited(channel.url);
       const streamHeaders = Object.keys(channel.headers || {}).length > 0 ? channel.headers : parsed.headers;
 
-      let clearkeyObj = undefined;
-      if (channel.drmScheme === 'clearkey' && channel.drmLicense) {
-        if (channel.drmLicense.includes(':')) {
-          const [keyId, key] = channel.drmLicense.split(':');
-          clearkeyObj = { keyId, key };
-        } else {
-          try {
-            clearkeyObj = JSON.parse(channel.drmLicense);
-          } catch (_) {}
-        }
-      }
+      const clearkeyObj = (channel.drmScheme === 'clearkey' && channel.drmLicense)
+        ? SkTechCrypto.formatClearKey(channel.drmLicense)
+        : undefined;
 
       return [{
         name: '⚡ Direct Stream',
@@ -377,14 +369,55 @@ class SkTechChannelResolver {
     // Case 1: Custom channel item with link definition (`pro/<id>.txt`)
     const linkPath = channel.links || (channel.type === 'pro' ? channel.api : '');
     if (linkPath && linkPath.startsWith('pro/')) {
-      return await SkTechMatchResolver.resolveMatchStreams(linkPath, channel.title);
+      const streams = await SkTechMatchResolver.resolveMatchStreams(linkPath, channel.title);
+      if (streams && streams.length > 0) {
+        return streams;
+      }
+      // Fallback: emit direct URL from the channel entry if pro/ resolution returned empty
+      const fallbackUrl = channel.url || channel.api;
+      if (fallbackUrl && fallbackUrl.startsWith('http')) {
+        const parsed = SkTechEmbedExtractor.parseDelimited(fallbackUrl);
+        return [{
+          name: '⚡ Direct Stream',
+          title: `SK Tech | ${channel.title}${channel.group ? ' (' + channel.group + ')' : ''}`,
+          url: parsed.url || fallbackUrl,
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: {
+              request: Object.keys(channel.headers || {}).length > 0 ? channel.headers : parsed.headers
+            }
+          },
+          score: 80
+        }];
+      }
+      return [];
     }
 
     // Case 2: Custom channel pointing to a group definition (`channels/<id>.txt`)
     if (channel.type === 'custom' && channel.api) {
       const groupItems = await this.fetchCustomChannelGroup(channel.api);
       if (groupItems.length > 0 && groupItems[0].links) {
-        return await SkTechMatchResolver.resolveMatchStreams(groupItems[0].links, channel.title);
+        const streams = await SkTechMatchResolver.resolveMatchStreams(groupItems[0].links, channel.title);
+        if (streams && streams.length > 0) {
+          return streams;
+        }
+      }
+      // Fallback: emit direct URL from the channel entry if group resolution returned empty
+      const fallbackUrl = channel.url || (channel.api.startsWith('http') ? channel.api : '');
+      if (fallbackUrl && fallbackUrl.startsWith('http')) {
+        const parsed = SkTechEmbedExtractor.parseDelimited(fallbackUrl);
+        return [{
+          name: '⚡ Direct Stream',
+          title: `SK Tech | ${channel.title}${channel.group ? ' (' + channel.group + ')' : ''}`,
+          url: parsed.url || fallbackUrl,
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: {
+              request: Object.keys(channel.headers || {}).length > 0 ? channel.headers : parsed.headers
+            }
+          },
+          score: 80
+        }];
       }
     }
 
@@ -407,6 +440,10 @@ class SkTechChannelResolver {
             const streams = [];
 
             for (const ch of channels) {
+              const clearkeyObj = (ch.drmScheme === 'clearkey' && ch.drmLicense)
+                ? SkTechCrypto.formatClearKey(ch.drmLicense)
+                : undefined;
+
               streams.push({
                 name: '⚡ Direct Stream',
                 title: `SK Tech | ${ch.title}`,
@@ -417,6 +454,7 @@ class SkTechChannelResolver {
                     request: ch.headers
                   }
                 },
+                clearkey: clearkeyObj,
                 score: 90
               });
             }
