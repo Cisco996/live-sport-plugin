@@ -54,9 +54,13 @@ class SkTechChannelResolver {
 
       const name = (item.name || `Channel ${i + 1}`).trim();
       if (/^test$/i.test(name) || /^demo$/i.test(name)) continue;
+      if (/jtv|jiostar|play\s*tata|vzy/i.test(name)) continue;
       const logo = item.logo || '';
       const type = item.type || 'm3u';
       const api = item.api || '';
+
+      // Skip public iptv-org country bouquets and dead FAST servers to eliminate clutter and timeouts
+      if (api.includes('iptv-org.github.io') || api.includes('apsattv.com')) continue;
 
       // ────────────────────────────────────────────────────────────────────────
       // Tier 1: Custom channel group definitions (channels/<id>.txt)
@@ -100,11 +104,39 @@ class SkTechChannelResolver {
 
           const subChannels = await this.fetchM3uBouquet(api, defaultGroup);
           if (subChannels && subChannels.length > 0) {
-            // Limit massive playlists (e.g. 5,600+ USA channels) to top 250 to protect memory and responsiveness
-            const maxChannels = Math.min(subChannels.length, 250);
+            let selectedChannels = subChannels;
+            if (defaultGroup === 'USA TV') {
+              // Prioritize Sports, Networks, and News over obscure local channels
+              const sports = [];
+              const networks = [];
+              const otherClean = [];
+              for (const sub of subChannels) {
+                const grp = (sub.group || '').toLowerCase();
+                if (/sport|espn|btn|ncaa|peacock|ppv|nhl|ahl|mlb|nba|nfl|mls|fight/i.test(grp)) {
+                  sports.push(sub);
+                } else if (/network|premium|news/i.test(grp)) {
+                  networks.push(sub);
+                } else {
+                  otherClean.push(sub);
+                }
+              }
+              selectedChannels = [...sports, ...networks, ...otherClean].slice(0, 350);
+            } else {
+              selectedChannels = subChannels.slice(0, 250);
+            }
 
-            for (let j = 0; j < maxChannels; j++) {
-              const sub = subChannels[j];
+            for (let j = 0; j < selectedChannels.length; j++) {
+              const sub = selectedChannels[j];
+              if (sub.drmScheme || (sub.url && sub.url.includes('.mpd'))) continue;
+              let channelGroup = sub.group || defaultGroup;
+              if (defaultGroup === 'USA TV') {
+                if (/sport|espn|btn|ncaa|peacock|ppv|nhl|ahl|mlb|nba|nfl|mls|fight/i.test(sub.group || '')) {
+                  channelGroup = 'Sports Channels';
+                } else {
+                  channelGroup = 'USA TV';
+                }
+              }
+
               channels.push({
                 id: `sktech_ch_m3u_${i}_${j}`,
                 title: sub.title,
@@ -117,7 +149,7 @@ class SkTechChannelResolver {
                 headers: sub.headers,
                 drmScheme: sub.drmScheme,
                 drmLicense: sub.drmLicense,
-                group: sub.group || defaultGroup,
+                group: channelGroup,
                 language: sub.language
               });
             }
@@ -156,7 +188,7 @@ class SkTechChannelResolver {
           'Accept': '*/*',
           ...parsed.headers
         },
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(5000)
       });
 
       if (!res.ok) return [];
@@ -252,11 +284,23 @@ class SkTechChannelResolver {
           const t = currentTitle || '';
           const g = currentGroup || '';
           const isRadio = g.startsWith('Radio_') || /\b(radio|fm|podcast)\b/i.test(t) || /\bradio\b/i.test(g);
+          const isReligious = /relig|church|jesus|gospel|catholic|christ|bible|islam|quran|faith/i.test(g) ||
+                              /relig|church|jesus|gospel|catholic|christ|bible|islam|quran|faith/i.test(t);
+          const isShopping = /shopping|qvc|hsn/i.test(g) || /qvc|hsn/i.test(t);
           const isOfflineOrGeo = /\[geo-blocked\]|\[not 24\/7\]|\(offline\)|\[offline\]|\(unavailable\)|\[dead\]|\[off air\]|\[not working\]|\[testing\]/i.test(t);
           const isPlaceholder = /download sk tech|placeholder/i.test(t);
-          const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com|hoast-plm\.shop/i.test(streamUrl) || /token=expired/i.test(streamUrl);
+          const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com|hoast-plm\.shop/i.test(streamUrl)
+            || /pluto\.tv/i.test(streamUrl)             // Nukes all 740 "That's a wrap" slates
+            || /kstv\.us/i.test(streamUrl)              // Nukes 717 expired 401 accounts
+            || /vocotv\.pro/i.test(streamUrl)           // Nukes 574 offline connection-refused servers
+            || /scalecdn\.co/i.test(streamUrl)          // Nukes 365 expired 401 accounts
+            || /moveonjoy\.com/i.test(streamUrl)        // Nukes 107 connection hangup servers
+            || /dfqz\.cc|supersonictv|1tv41\.icu|nonamevos/i.test(streamUrl)
+            || /frequency\.stream/i.test(streamUrl)     // Nukes dead FAST frequency streams
+            || /cord-cutter\.net|raccoon\.bz/i.test(streamUrl)
+            || /token=expired/i.test(streamUrl);
 
-          if (!isRadio && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
+          if (!isRadio && !isReligious && !isShopping && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
             channels.push({
               title: currentTitle || `Channel ${channels.length + 1}`,
               logo: currentLogo,

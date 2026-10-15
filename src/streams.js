@@ -588,6 +588,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         return null;
       }
 
+      // Reject Pluto TV takedown slates ("That's a wrap" / "no longer available on this device" loops)
+      if (/takedownslate|ptv_takedownslates/i.test(bodySample)) {
+        console.log(`[Filter] Dropped Pluto takedown slate: ${targetUrl}`);
+        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        return null;
+      }
+
       // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time (for HLS)
       if (!isMpd) {
         const parsedQuality = m3u8Parser.parseManifestText(bodySample);
@@ -851,6 +858,21 @@ async function handleStream(type, id, config) {
     'sktech': 'SKTech'
   };
 
+  // ─── Eliminate all DASH (.mpd) & ClearKey DRM streams completely ──────
+  // ExoPlayer on stock Android apps lacks MediaDrm callbacks, causing black screen + timer.
+  const nonDash = streams.filter(s => {
+    const u = (s.url || s.streamUrl || s._rawMpdUrl || '').toLowerCase();
+    const isMpd = u.includes('.mpd') || u.includes('/api/manifest');
+    const isDash = isMpd || s.clearkey || s.format === 'dash' || (s.type && s.type.includes('dash'));
+    return !isDash;
+  });
+  if (nonDash.length < streams.length) {
+    const droppedCount = streams.length - nonDash.length;
+    streams.length = 0;
+    streams.push(...nonDash);
+    console.log(`[streams.js] Eliminated ${droppedCount} DASH stream(s) for ${matchId}`);
+  }
+
   streams.forEach(s => {
     // Tag proxied manifest URLs with their resolve-cache key (see withResolveKey).
     s.url = withResolveKey(s.url, s._cacheKey);
@@ -945,12 +967,6 @@ async function handleStream(type, id, config) {
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
-
-    // If it's a DASH stream with ClearKey DRM, route it through our manifest proxy so ExoPlayer can decrypt
-    if (s.url && s.url.includes('.mpd') && s.clearkey && !s.url.includes('/api/manifest')) {
-      s._rawMpdUrl = s.url;
-      s.url = SkTechCrypto.buildDashManifestUrl(s.url, s.clearkey, s.behaviorHints.proxyHeaders?.request || {});
-    }
     
     // If it's a direct m3u8 stream and not routed through our proxy, mark it notWebReady
     if (s.url && s.url.includes('.m3u8') && !s.url.includes('/api/manifest')) {
