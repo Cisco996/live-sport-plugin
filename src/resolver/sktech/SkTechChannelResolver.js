@@ -234,28 +234,19 @@ class SkTechChannelResolver {
       if (!line) continue;
 
       if (line.startsWith('#EXTINF:')) {
-        // Extract channel title after last comma
         const commaIdx = line.indexOf(',');
         if (commaIdx !== -1) {
           currentTitle = line.slice(commaIdx + 1).trim();
         }
-
-        // Extract group-title="..."
-        const groupMatch = line.match(/group-title="([^"]+)"/i);
-        if (groupMatch && groupMatch[1].trim()) {
-          currentGroup = groupMatch[1].trim();
-        }
-
-        // Extract tvg-logo="..."
-        const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
-        if (logoMatch && logoMatch[1].trim()) {
-          currentLogo = logoMatch[1].trim();
-        }
-
-        // Extract tvg-language="..."
-        const langMatch = line.match(/tvg-language="([^"]+)"/i);
-        if (langMatch && langMatch[1].trim()) {
-          currentLang = langMatch[1].trim();
+        const metaPortion = commaIdx !== -1 ? line.slice(0, commaIdx) : line;
+        const attrRe = /\b(group-title|tvg-logo|tvg-language)="([^"]*)"/gi;
+        let match;
+        while ((match = attrRe.exec(metaPortion)) !== null) {
+          const key = match[1].toLowerCase();
+          const val = match[2];
+          if (key === 'group-title' && val.trim()) currentGroup = val.trim();
+          else if (key === 'tvg-logo' && val.trim()) currentLogo = val.trim();
+          else if (key === 'tvg-language' && val.trim()) currentLang = val.trim();
         }
       } else if (line.startsWith('#KODIPROP:inputstream.adaptive.license_type=')) {
         const val = line.split('=')[1].trim().toLowerCase();

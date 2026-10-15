@@ -1224,15 +1224,13 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   } else if (filterType === 'nhl') {
     matches = matches.filter(m => (m.league && /nhl/i.test(m.league)) || /\bnhl\b/i.test(m.title));
   } else if (filterType === 'atp' || filterType === 'wta') {
-    matches = matches.filter(m => (m.league && new RegExp(filterType, 'i').test(m.league)) || new RegExp('\\b' + filterType + '\\b', 'i').test(m.title));
+    const leagueRe = new RegExp(filterType, 'i');
+    const titleRe = new RegExp('\\b' + filterType + '\\b', 'i');
+    matches = matches.filter(m => (m.league && leagueRe.test(m.league)) || titleRe.test(m.title));
   }
 
-  // Sort newest kickoff first
-  matches.sort((a, b) => {
-    const dateA = a.date ? getKickoff(a.date) : 0;
-    const dateB = b.date ? getKickoff(b.date) : 0;
-    return dateB - dateA;
-  });
+  // Sort newest kickoff first via Schwartzian Transform in O(N + N log N)
+  matches = sortCatalogMatches(matches, true);
 
   if (extra && extra.search) {
     const q = extra.search.toLowerCase();

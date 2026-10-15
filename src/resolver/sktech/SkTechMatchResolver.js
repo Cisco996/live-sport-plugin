@@ -163,21 +163,24 @@ class SkTechMatchResolver {
       if (!line) continue;
 
       if (line.startsWith('#EXTINF:')) {
-        curMeta = {};
+        curMeta = { tvgId: '', tvgName: '', logo: '', lang: '', group: '', rawTitle: '' };
         curOpts = {};
-        const idM   = line.match(/tvg-id="([^"]+)"/i);
-        const nameM = line.match(/tvg-name="([^"]+)"/i);
-        const logoM = line.match(/tvg-logo="([^"]+)"/i);
-        const langM = line.match(/tvg-language="([^"]+)"/i);
-        const groupM = line.match(/group-title="([^"]+)"/i);
         const commaIdx = line.indexOf(',');
-
-        curMeta.tvgId    = idM    ? idM[1]    : '';
-        curMeta.tvgName  = nameM  ? nameM[1]  : '';
-        curMeta.logo     = logoM  ? logoM[1]  : '';
-        curMeta.lang     = langM  ? langM[1]  : '';
-        curMeta.group    = groupM ? groupM[1] : '';
-        curMeta.rawTitle = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '';
+        if (commaIdx !== -1) {
+          curMeta.rawTitle = line.slice(commaIdx + 1).trim();
+        }
+        const metaPortion = commaIdx !== -1 ? line.slice(0, commaIdx) : line;
+        const attrRe = /\b(tvg-id|tvg-name|tvg-logo|tvg-language|group-title)="([^"]*)"/gi;
+        let match;
+        while ((match = attrRe.exec(metaPortion)) !== null) {
+          const key = match[1].toLowerCase();
+          const val = match[2];
+          if (key === 'tvg-id') curMeta.tvgId = val;
+          else if (key === 'tvg-name') curMeta.tvgName = val;
+          else if (key === 'tvg-logo') curMeta.logo = val;
+          else if (key === 'tvg-language') curMeta.lang = val;
+          else if (key === 'group-title') curMeta.group = val;
+        }
       } else if (line.startsWith('#EXTVLCOPT:')) {
         const opt = line.slice(11).trim();
         const [k, v] = opt.split('=');
