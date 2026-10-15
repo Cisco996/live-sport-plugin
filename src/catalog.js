@@ -77,7 +77,7 @@ const REPLAY_SPORTS = [
 ];
 
 // Sources whose matches qualify for the replay retention window and replay hubs.
-const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull']);
+const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces']);
 
 const GENRE_TO_CATEGORY = {
   'football': 'football',
