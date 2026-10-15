@@ -486,17 +486,19 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   let isChannelThumbnail = !!matchedChannelThumb;
   const isMatchup = !!(team1Name && team2Name);
   const isMotorsport = match.category === 'motorsport';
-
-  // Check if we have a locally defined, verified hi-res logo for this specific channel name
-  const customLogo = getChannelLogo(match.title);
-  if (customLogo && !isMatchup) {
+  // Check if we have a locally defined, verified hi-res logo for this specific channel name.
+  // ONLY for continuous 24/7 TV channels (e.g. networks catalog) — NEVER discard provider thumbnails
+  // for sporting events, motorsport, or replays!
+  const is247Channel = match.category === 'networks' || match.isChannel || (match.id && (match.id.startsWith('dlv_ch_') || match.id.startsWith('cdn_ch_') || match.id.startsWith('sktech_ch_')));
+  const customLogo = (is247Channel || (!isReplay && !isMotorsport)) ? getChannelLogo(match.title) : null;
+  if (customLogo && !isMatchup && !isReplay && !isMotorsport) {
     isChannelThumbnail = false; // We want to use it as the main artwork, not a tiny badge
     providerLogo = customLogo;
     providerThumb = null; // Discard the ugly provider thumb
   }
 
-  const needsLogo = !providerLogo && !providerTeamLogo && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
-  const needsPoster = !providerPoster && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
+  const needsLogo = !providerLogo && !providerTeamLogo && (!providerThumb || isChannelThumbnail || isMatchup || (isMotorsport && !providerThumb));
+  const needsPoster = !providerPoster && (!providerThumb || isChannelThumbnail || isMatchup || (isMotorsport && !providerThumb));
 
   // A provider thumbnail that is really a crest/icon (rather than landscape
   // artwork) cannot serve as a poster; it only suits the embedded single-crest
@@ -582,7 +584,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
 
   if (providerPoster) {
     poster = buildImg(providerPoster, posterText, color) || fallbackPoster;
-  } else if (providerThumb && !isMatchup && !isChannelThumbnail) {
+  } else if (providerThumb && (!isMatchup || isMotorsport || isReplay) && !isChannelThumbnail) {
     poster = buildImg(providerThumb, posterText, color, isThumbLogo) || fallbackPoster;
   } else if (providerLogo && !isMatchup) {
     poster = buildImg(providerLogo, posterText, color, true) || fallbackPoster;
