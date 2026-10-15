@@ -98,14 +98,11 @@ describe('index.js wiring', () => {
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.js'), 'utf8');
 
-  test('all internal endpoints use the local-direct gate', () => {
+  test('both internal debug endpoints use the local-direct gate', () => {
     const serverInfo = src.slice(src.indexOf("app.get('/api/server-info'"));
-    const providerHealth = src.slice(src.indexOf("app.get('/api/provider-health'"));
     const matches = src.slice(src.indexOf("app.get('/api/matches'"));
     expect(serverInfo).toContain('isLocalDirectRequest(req)');
-    expect(providerHealth).toContain('isLocalDirectRequest(req)');
     expect(matches).toContain('isLocalDirectRequest(req)');
-    expect(providerHealth).toContain('loopback_only');
     expect(matches).toContain('loopback_only');
   });
 

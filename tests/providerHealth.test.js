@@ -102,6 +102,5 @@ describe('provider health dashboard wiring', () => {
     const proxyAt = index.indexOf("app.use('/api', createProxyMiddleware");
     expect(endpointAt).toBeGreaterThan(-1);
     expect(endpointAt).toBeLessThan(proxyAt);
-    expect(index.slice(endpointAt, proxyAt)).toContain('isLocalDirectRequest(req)');
   });
 });

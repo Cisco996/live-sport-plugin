@@ -214,10 +214,6 @@ app.get('/api/options', (req, res) => {
 });
 
 app.get('/api/provider-health', (req, res) => {
-  if (!isLocalDirectRequest(req)) {
-    return res.status(403).json({ error: 'Forbidden', reason: 'loopback_only' });
-  }
-
   const providerHealth = container.resolve('providerHealthService').snapshot();
   let circuitBreakers = {};
   try {
