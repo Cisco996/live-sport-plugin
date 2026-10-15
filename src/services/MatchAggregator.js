@@ -45,6 +45,26 @@ function _parseEventDate(raw) {
 }
 
 /**
+ * Strips diacritics and maps non-combining Latin characters to plain ASCII
+ * so international team spellings (e.g. "Lech Poznań" vs "Lech Poznan",
+ * "Beşiktaş" vs "Besiktas", "Ferencváros" vs "Ferencvaros") merge reliably.
+ */
+function _foldText(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/[đĐ]/g, 'dj')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[łŁ]/g, 'l')
+    .replace(/[øØ]/g, 'o')
+    .replace(/[æÆ]/g, 'ae')
+    .replace(/[œŒ]/g, 'oe')
+    .replace(/[ß]/g, 'ss')
+    .replace(/[ðÐ]/g, 'd')
+    .replace(/[þÞ]/g, 'th');
+}
+
+/**
  * Normalizes team/event names by collapsing well-known multi-word clubs and
  * popular abbreviations into single collision-safe compound tokens so that
  * Jaccard / subset matching cannot accidentally merge different teams that share
@@ -139,32 +159,20 @@ function _compoundify(t) {
     [/\bnam\s*dinh\b/g, 'namdinh'],
     [/\bbinh\s*duong\b|\bbihn\s*duong\b/g, 'binhduong'],
   ];
-  let r = t.toLowerCase();
+  let r = _foldText(t).toLowerCase();
   for (const [regex, rep] of aliases) r = r.replace(regex, rep);
   return r;
 }
 
-function _stripDiacritics(str) {
-  if (!str) return '';
-  return String(str)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[đĐ]/g, 'd')
-    .replace(/[øØ]/g, 'o')
-    .replace(/[æÆ]/g, 'ae')
-    .replace(/[œŒ]/g, 'oe')
-    .replace(/[ß]/g, 'ss');
-}
-
 function _stripNoise(t) {
   if (!t) return '';
-  return _stripDiacritics(t)
+  return _foldText(t)
     .replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\b(live|stream|streaming|free|hd|fhd|4k|hq|web|online|tv|match|fixture|round|week|day|game|league|cup|tournament|season|fc|cf|sc|cd|ca|afc|fk|sk|bk|rsc|vfb|tsv)\b/gi, ' ');
+    .replace(/\b(live|stream|streaming|free|hd|fhd|4k|hq|web|online|tv|match|fixture|round|week|day|game|league|cup|tournament|season|fc|cf|sc|cd|ca|afc|fk|sk|bk|rsc|vfb|tsv|tsg)\b/gi, ' ');
 }
 
 function _tokenize(t) {
-  return t.replace(/[^a-z0-9]/g, ' ').split(/\s+/)
+  return _foldText(t).replace(/[^a-z0-9]/g, ' ').split(/\s+/)
     .filter(w => w.length > 2)
     .map(w => (w.length > 3 && w.endsWith('s')) ? w.slice(0, -1) : w); // naive singular: newells->newell, sports->sport
 }
@@ -194,7 +202,7 @@ function _teamsSimilar(a, b) {
  * Returns null if the title doesn't look like a "team1 vs team2" fixture.
  */
 function _tryExtractTeams(title) {
-  const clean = _compoundify(_stripNoise(title));
+  const clean = _compoundify(_stripNoise(_foldText(title)));
   const parts = clean.split(/\s(?:vs?\.?|@|[-–—])\s/i);
   if (parts.length === 2) {
     return [_tokenize(parts[0]).join(' '), _tokenize(parts[1]).join(' ')];
@@ -222,7 +230,7 @@ class MatchAggregator {
    * of inside every comparison removes ~50x of repeated work on large catalogs.
    */
   _precompute(e) {
-    const title = e && e.title ? String(e.title) : '';
+    const title = e && e.title ? _foldText(e.title) : '';
     const id = e && e.id != null ? String(e.id) : '';
     const normalized = _compoundify(_stripNoise(title));
     return {
