@@ -109,7 +109,16 @@ class CronService {
       }
     });
 
-    // Run first sync immediately on boot
+    // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately
+    setImmediate(async () => {
+      try {
+        console.log('[CronService] Initiating startup match sync...');
+        await this.runSync();
+      } catch (err) {
+        console.error('[CronService] Startup match sync failed:', err.message);
+      }
+    });
+
     const externalUrl = process.env.RENDER_EXTERNAL_URL;
     if (externalUrl) {
       console.log(`[CronService] Keep-alive enabled for ${externalUrl}`);

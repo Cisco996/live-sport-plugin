@@ -794,6 +794,19 @@ async function handleStream(type, id, config) {
     }
   }
 
+  // When match is a replay, strictly restrict to replay-capable providers
+  // (Prevents live feeds or test/demo streams from masquerading as replays)
+  try {
+    const { isReplayMatch } = require('./catalog');
+    if (isReplayMatch(match)) {
+      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces']);
+      const replaySources = candidateSources.filter(s => s && REPLAY_SOURCES.has(s.source));
+      if (replaySources.length > 0) {
+        candidateSources = replaySources;
+      }
+    }
+  } catch (_) {}
+
   const activeSources = selectSources(candidateSources, config);
   const streamScorer = container.resolve('streamScorer');
 

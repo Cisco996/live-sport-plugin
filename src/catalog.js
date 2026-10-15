@@ -177,9 +177,12 @@ function isReplayMatch(match) {
   if (match.category === 'networks') return false;
   if (match.status === 'postponed' || match.status === 'cancelled') return false;
 
-  // Replays require a replay-capable provider (replayzone, livetv)
-  if (match.sources && match.sources.length > 0) {
-    if (!match.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
+  // Replays require a replay-capable provider (replayzone, livetv, soccerfull, basketballvideo, nflvideo, fullraces)
+  if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) {
+    return false;
+  }
+  if (!match.sources.some(s => REPLAY_SOURCES.has(s.source))) {
+    return false;
   }
 
   const kickoff = match.date ? getKickoff(match.date) : 0;
@@ -1141,16 +1144,19 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     return { metas: [] };
   }
 
-  const sub = id.replace('nuvio_sports_replays_', '');
+  const sub = id.replace('nuvio_sports_replays_', '').replace(/^american-football/, 'american_football');
   
   // Known sports for replays
   const sports = ['football', 'motorsport', 'baseball', 'rugby', 'basketball', 'tennis', 'hockey', 'american_football'];
   let targetSport = sports.find(s => sub === s || sub.startsWith(s + '_')) || 'other';
-  let filterType = sub.replace(targetSport, '').replace(/^_/, ''); // e.g. '', 'recent', 'premier_league', 'ucl', 'f1', 'nba', 'mlb'
+  let filterType = sub.replace(targetSport, '').replace(/^_/, ''); // e.g. '', 'today', 'yesterday', 'this_week', 'recent', 'premier_league', 'ucl', 'f1', 'nba', 'mlb', 'nfl', 'nhl', 'atp'
 
   const cacheService = container.resolve('cacheService');
   let rawMatches = (cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches()) || [];
-  if (rawMatches.length === 0 || !rawMatches.some(m => isReplayMatch(m))) {
+
+  // Check if target sport has 0 replays in memory/cache; if so, trigger aggregator sync
+  const hasSportReplays = rawMatches.some(m => isReplayMatch(m) && (targetSport === 'other' || m.category === targetSport));
+  if (rawMatches.length === 0 || !hasSportReplays) {
     try {
       const aggregator = container.resolve('matchAggregator');
       const synced = await aggregator.syncMatches();
@@ -1177,18 +1183,31 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   // `skip` pages the filtered set exactly as it pages the unfiltered one.
   matches = filterReplayMatches(matches, config);
 
+  // Helper to extract YYYY-MM-DD from any match date (ISO string, epoch ms Number, or numeric string)
+  const getMatchDateStr = (m) => {
+    if (!m || !m.date) return '';
+    if (typeof m.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(m.date)) {
+      return m.date.slice(0, 10);
+    }
+    const ko = getKickoff(m.date);
+    if (ko > 0) {
+      return new Date(ko).toISOString().slice(0, 10);
+    }
+    return '';
+  };
+
   // Apply sub-filters
   const dateMatch = filterType.match(/(?:date_)?(\d{4}-\d{2}-\d{2})/);
   if (dateMatch) {
     const targetDate = dateMatch[1];
-    matches = matches.filter(m => m.date && m.date.startsWith(targetDate));
+    matches = matches.filter(m => getMatchDateStr(m) === targetDate);
   } else if (filterType === 'today') {
     const todayStr = new Date().toISOString().slice(0, 10);
-    matches = matches.filter(m => m.date && m.date.startsWith(todayStr));
+    matches = matches.filter(m => getMatchDateStr(m) === todayStr);
   } else if (filterType === 'yesterday') {
     const yDate = new Date(Date.now() - 86400000);
     const yesterdayStr = yDate.toISOString().slice(0, 10);
-    matches = matches.filter(m => m.date && m.date.startsWith(yesterdayStr));
+    matches = matches.filter(m => getMatchDateStr(m) === yesterdayStr);
   } else if (filterType === 'this_week') {
     const twoDaysAgo = Date.now() - 2 * 86400000;
     const sevenDaysAgo = Date.now() - 7 * 86400000;

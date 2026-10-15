@@ -120,6 +120,12 @@ class SkTechMatchResolver {
       const kickoff = this.parseKickoff(item.date, item.time);
       const linkPath = item.links || '';
 
+      if (!linkPath) continue;
+      const isTestOrDemo = /^test\b|^demo\b|^placeholder\b|^sample\b/i.test(title) ||
+                           /test_pic|streamtest|livetest|\/test\.m3u8/i.test(linkPath) ||
+                           (title === 'Live Sports Event' && !linkPath);
+      if (isTestOrDemo) continue;
+
       matches.push({
         id: `sktech_match_${i}_${Buffer.from(linkPath).toString('base64url').slice(0, 16)}`,
         title,
@@ -192,6 +198,14 @@ class SkTechMatchResolver {
         const parsed = SkTechEmbedExtractor.parseDelimited(line);
         if (parsed.url) {
           const clean   = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
+          const isTestOrDemo = /^test\b|^demo\b|^placeholder\b|^sample\b/i.test(clean) ||
+                               /test_pic|streamtest|livetest|\/test\.m3u8|\/test\//i.test(parsed.url);
+          if (isTestOrDemo) {
+            curMeta = null;
+            curOpts = {};
+            continue;
+          }
+
           const cat     = this.normalizeCategory(curMeta.group, clean);
           const mapKey  = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 

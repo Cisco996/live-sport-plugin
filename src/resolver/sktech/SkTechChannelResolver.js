@@ -74,6 +74,9 @@ class SkTechChannelResolver {
 
             for (let j = 0; j < subChannels.length; j++) {
               const sub = subChannels[j];
+              const subTitle = (sub.title || '').trim();
+              if (/^test\b|^demo\b|^placeholder\b/i.test(subTitle)) continue;
+              if (/test/i.test(sub.links || '')) continue;
               channels.push({
                 id: `sktech_ch_cust_${i}_${j}`,
                 title: sub.title || `${name} - ${j + 1}`,
@@ -274,6 +277,8 @@ class SkTechChannelResolver {
         if (streamUrl) {
           const t = currentTitle || '';
           const g = currentGroup || '';
+          const isTestOrDemo = /^test\b|^demo\b|^placeholder\b|^sample\b|^trial\b/i.test(t) ||
+                               /streamtest|livetest|\/test\.m3u8|\/test\/|test_pic|test_trojka|test_infokanal|test_cgtn/i.test(streamUrl);
           const isRadio = g.startsWith('Radio_') || /\b(radio|fm|podcast)\b/i.test(t) || /\bradio\b/i.test(g);
           const isReligious = /relig|church|jesus|gospel|catholic|christ|bible|islam|quran|faith/i.test(g) ||
                               /relig|church|jesus|gospel|catholic|christ|bible|islam|quran|faith/i.test(t);
@@ -291,7 +296,7 @@ class SkTechChannelResolver {
             || /cord-cutter\.net|raccoon\.bz/i.test(streamUrl)
             || /token=expired/i.test(streamUrl);
 
-          if (!isRadio && !isReligious && !isShopping && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
+          if (!isTestOrDemo && !isRadio && !isReligious && !isShopping && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {
             channels.push({
               title: currentTitle || `Channel ${channels.length + 1}`,
               logo: currentLogo,

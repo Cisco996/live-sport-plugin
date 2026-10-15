@@ -296,8 +296,8 @@ class MatchAggregator {
   }
 
   _sameEventPre(p1, p2) {
-    // 0. Static VOD Replays must NEVER merge with continuous 24/7 TV channels
-    if ((p1.isReplay && p2.isChannel) || (p2.isReplay && p1.isChannel)) {
+    // 0. Static VOD Replays must NEVER merge with continuous 24/7 TV channels or live fixtures
+    if ((p1.isReplay && (p2.isChannel || !p2.isReplay)) || (p2.isReplay && (p1.isChannel || !p1.isReplay))) {
       return false;
     }
 
@@ -676,6 +676,13 @@ class MatchAggregator {
       ? this.cacheService.getMatches()
       : [];
     const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo' || s.source === 'fullraces'));
+
+    // Sanitize cached replays: purge non-replay sources (e.g. sktech/daddylive feeds mistakenly attached in past runs)
+    for (const m of previousReplays) {
+      if (Array.isArray(m.sources)) {
+        m.sources = m.sources.filter(s => s && REPLAY_PROVIDERS.has(s.source));
+      }
+    }
 
     const cachedProviderCounts = new Map();
     if (previousReplays.length > 0) {
