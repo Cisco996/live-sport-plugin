@@ -101,26 +101,21 @@ describe('BasketballVideoProvider', () => {
       };
 
       const streams = await provider._extractOkRu('https://ok.ru/videoembed/987654321', 'Full Game');
-      expect(streams).toHaveLength(4);
+      // Deduplicated: only top quality (1080p) + Auto HLS returned to prevent 240p/360p/480p clutter
+      expect(streams).toHaveLength(2);
 
-      // Verify 1080p
+      // Verify 1080p top quality
       const s1080 = streams.find(s => s.resolution === '1080p');
       expect(s1080).toBeDefined();
       expect(s1080.url).toBe('https://vd123.okcdn.ru/video1080.mp4');
       expect(s1080.title).toBe('Full Game (1080p) [OK.ru]');
       expect(s1080.behaviorHints.notWebReady).toBe(false);
 
-      // Verify 720p
+      // Lower bitrates (720p, 480p) should be suppressed
       const s720 = streams.find(s => s.resolution === '720p');
-      expect(s720).toBeDefined();
-      expect(s720.url).toBe('https://vd123.okcdn.ru/video720.mp4');
-      expect(s720.behaviorHints.notWebReady).toBe(false);
-
-      // Verify 480p
+      expect(s720).toBeUndefined();
       const s480 = streams.find(s => s.resolution === '480p');
-      expect(s480).toBeDefined();
-      expect(s480.url).toBe('https://vd123.okcdn.ru/video480.mp4');
-      expect(s480.behaviorHints.notWebReady).toBe(false);
+      expect(s480).toBeUndefined();
 
       // Verify Auto HLS
       const sHls = streams.find(s => s.resolution === 'Auto');

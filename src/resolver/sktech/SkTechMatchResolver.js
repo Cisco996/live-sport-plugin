@@ -48,7 +48,7 @@ class SkTechMatchResolver {
     title = title.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]\s*/u, '');
     title = title.replace(/^\[[^\]]+\]\s*/, '');
     // Strip resolution and quality tags: e.g. "1080p", "720p", "(HD)", "[FHD]", "4K"
-    title = title.replace(/\s*([\[(]?(?:4K|UHD|FHD|HD|1080p?|720p?|540p?|480p?|360p?)[\])]?)\s*$/i, '');
+    title = title.replace(/\s*([\[(]?(?:4K|UHD|FHD|HD|1080p?|720p?|540p?|480p?|360p?|240p?|144p?)[\])]?)\s*$/i, '');
     // Strip date/match-day suffixes
     title = title.replace(/\s*-\s*(?:MD\s*\d+\s*-\s*)?\d{1,2}\s+[A-Za-z]+\s+\d{4}.*$/i, '');
     title = title.replace(/\s*\[LIVE\].*$/i, '');
@@ -138,6 +138,129 @@ class SkTechMatchResolver {
   }
 
   /**
+   * Public M3U content parser — extracts and deduplicates per-resolution match entries.
+   * Used by fetchDynamicM3uMatches (fetches remote M3U then calls this) and directly
+   * by unit tests to exercise the quality-dedup logic without network I/O.
+   *
+   * @param {string}  m3uText  - Raw M3U playlist text (EXTM3U format)
+   * @param {Object}  feed     - Feed descriptor: { label: string, url: string }
+   * @param {Map}     matchMap - Dedup index keyed by `cat:cleanTitle`
+   * @param {Array}   matches  - Output array accumulating match objects
+   */
+  parseM3UContent(m3uText, feed, matchMap, matches) {
+    const lines = m3uText.split(/\r?\n/);
+    let curMeta = null;
+    let curOpts = {};
+
+    const RES_WEIGHT = {
+      '1080P': 1080, '720P': 720, '540P': 540,
+      '480P': 480, '360P': 360, '240P': 240, '144P': 144, 'HD': 720
+    };
+    const feedKey = feed.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      if (line.startsWith('#EXTINF:')) {
+        curMeta = {};
+        curOpts = {};
+        const idM   = line.match(/tvg-id="([^"]+)"/i);
+        const nameM = line.match(/tvg-name="([^"]+)"/i);
+        const logoM = line.match(/tvg-logo="([^"]+)"/i);
+        const langM = line.match(/tvg-language="([^"]+)"/i);
+        const groupM = line.match(/group-title="([^"]+)"/i);
+        const commaIdx = line.indexOf(',');
+
+        curMeta.tvgId    = idM    ? idM[1]    : '';
+        curMeta.tvgName  = nameM  ? nameM[1]  : '';
+        curMeta.logo     = logoM  ? logoM[1]  : '';
+        curMeta.lang     = langM  ? langM[1]  : '';
+        curMeta.group    = groupM ? groupM[1] : '';
+        curMeta.rawTitle = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '';
+      } else if (line.startsWith('#EXTVLCOPT:')) {
+        const opt = line.slice(11).trim();
+        const [k, v] = opt.split('=');
+        if (k && v) {
+          if (/referrer/i.test(k))    curOpts['Referer']    = v;
+          if (/user-agent/i.test(k))  curOpts['User-Agent'] = v;
+        }
+      } else if (line.startsWith('http') && curMeta) {
+        const parsed = SkTechEmbedExtractor.parseDelimited(line);
+        if (parsed.url) {
+          const clean   = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
+          const cat     = this.normalizeCategory(curMeta.group, clean);
+          const mapKey  = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+          const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p)\b/i);
+          const resTag   = resMatch ? resMatch[1].toUpperCase() : 'HD';
+          const langKey  = (curMeta.lang || 'def').toLowerCase();
+          const srcId    = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${resTag}_${langKey}`;
+
+          const streamTitle = curMeta.lang && curMeta.lang.toLowerCase() !== 'english'
+            ? `SK Tech (${feed.label} ${resTag} - ${curMeta.lang})`
+            : (resTag !== 'HD' ? `SK Tech (${feed.label} ${resTag})` : `SK Tech (${feed.label})`);
+
+          const srcObj = {
+            source:        'sktech',
+            id:            srcId,
+            feedLabel:     feed.label,
+            langKey,
+            channelName:   `${feed.label} (${resTag})`,
+            resolution:    resTag,
+            type:          'fancode_direct',
+            streamUrl:     parsed.url,
+            streamHeaders: { ...curOpts, ...parsed.headers },
+            streamTitle
+          };
+
+          this._eventStreamCache.set(srcId, srcObj);
+          const incomingWeight = RES_WEIGHT[resTag] || 720;
+
+          if (matchMap.has(mapKey)) {
+            const matchObj = matchMap.get(mapKey);
+            // Quality deduplication: per feed+language, keep only the highest-bitrate stream
+            const existingIdx = matchObj.sources.findIndex(s =>
+              s.source === 'sktech' &&
+              s.type   === 'fancode_direct' &&
+              (s.feedLabel === feed.label || (s.channelName && s.channelName.startsWith(feed.label))) &&
+              s.langKey === langKey
+            );
+
+            if (existingIdx !== -1) {
+              const existingWeight = RES_WEIGHT[matchObj.sources[existingIdx].resolution] || 0;
+              if (incomingWeight > existingWeight) matchObj.sources[existingIdx] = srcObj;
+            } else {
+              matchObj.sources.push(srcObj);
+            }
+          } else {
+            const teamParts = clean.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
+            const teamA = teamParts.length === 2 ? { name: teamParts[0].trim(), logo: '' } : null;
+            const teamB = teamParts.length === 2 ? { name: teamParts[1].trim(), logo: '' } : null;
+
+            const matchObj = {
+              id:          `sktech_ev_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}`,
+              title:       clean,
+              category:    cat,
+              kickoff:     Date.now(),
+              rawCategory: curMeta.group || `${feed.label} Live`,
+              teamA,
+              teamB,
+              poster:      curMeta.logo,
+              sources:     [srcObj]
+            };
+
+            matchMap.set(mapKey, matchObj);
+            matches.push(matchObj);
+          }
+        }
+        curMeta = null;
+        curOpts = {};
+      }
+    }
+  }
+
+  /**
    * Fetches and unpacks discrete live sports events from dynamic M3U event feeds
    * (e.g. FanCode, Sony LIV) into distinct MatchEntities with playable direct HLS streams.
    *
@@ -149,7 +272,7 @@ class SkTechMatchResolver {
       return this._dynamicCache;
     }
 
-    const matches = [];
+    const matches  = [];
     const matchMap = new Map();
 
     const feedPromises = DYNAMIC_EVENT_FEEDS.map(async (feed) => {
@@ -159,102 +282,14 @@ class SkTechMatchResolver {
           signal: AbortSignal.timeout(6000)
         });
         if (!res.ok) return;
-
         const text = await res.text();
-        const lines = text.split(/\r?\n/);
-
-        let curMeta = null;
-        let curOpts = {};
-
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
-          if (!line) continue;
-
-          if (line.startsWith('#EXTINF:')) {
-            curMeta = {};
-            curOpts = {};
-            const idM = line.match(/tvg-id="([^"]+)"/i);
-            const nameM = line.match(/tvg-name="([^"]+)"/i);
-            const logoM = line.match(/tvg-logo="([^"]+)"/i);
-            const langM = line.match(/tvg-language="([^"]+)"/i);
-            const groupM = line.match(/group-title="([^"]+)"/i);
-            const commaIdx = line.indexOf(',');
-
-            curMeta.tvgId = idM ? idM[1] : '';
-            curMeta.tvgName = nameM ? nameM[1] : '';
-            curMeta.logo = logoM ? logoM[1] : '';
-            curMeta.lang = langM ? langM[1] : '';
-            curMeta.group = groupM ? groupM[1] : '';
-            curMeta.rawTitle = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '';
-          } else if (line.startsWith('#EXTVLCOPT:')) {
-            const opt = line.slice(11).trim();
-            const [k, v] = opt.split('=');
-            if (k && v) {
-              if (/referrer/i.test(k)) curOpts['Referer'] = v;
-              if (/user-agent/i.test(k)) curOpts['User-Agent'] = v;
-            }
-          } else if (line.startsWith('http') && curMeta) {
-            const parsed = SkTechEmbedExtractor.parseDelimited(line);
-            if (parsed.url) {
-              const clean = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
-              const cat = this.normalizeCategory(curMeta.group, clean);
-              const mapKey = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-              const feedKey = feed.label.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-              const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p)\b/i);
-              const resTag = resMatch ? resMatch[1].toUpperCase() : 'HD';
-              const srcId = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${resTag}_${(curMeta.lang || 'def').toLowerCase()}`;
-
-              const streamTitle = curMeta.lang && curMeta.lang.toLowerCase() !== 'english'
-                ? `SK Tech (${feed.label} ${resTag} - ${curMeta.lang})`
-                : (resTag !== 'HD' ? `SK Tech (${feed.label} ${resTag})` : `SK Tech (${feed.label})`);
-
-              const srcObj = {
-                source: 'sktech',
-                id: srcId,
-                channelName: `${feed.label} (${resTag})`,
-                resolution: resTag,
-                type: 'fancode_direct',
-                streamUrl: parsed.url,
-                streamHeaders: { ...curOpts, ...parsed.headers },
-                streamTitle
-              };
-
-              this._eventStreamCache.set(srcId, srcObj);
-
-              if (matchMap.has(mapKey)) {
-                matchMap.get(mapKey).sources.push(srcObj);
-              } else {
-                const teamParts = clean.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
-                const teamA = teamParts.length === 2 ? { name: teamParts[0].trim(), logo: '' } : null;
-                const teamB = teamParts.length === 2 ? { name: teamParts[1].trim(), logo: '' } : null;
-
-                const matchObj = {
-                  id: `sktech_ev_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}`,
-                  title: clean,
-                  category: cat,
-                  kickoff: Date.now(),
-                  rawCategory: curMeta.group || `${feed.label} Live`,
-                  teamA,
-                  teamB,
-                  poster: curMeta.logo,
-                  sources: [srcObj]
-                };
-
-                matchMap.set(mapKey, matchObj);
-                matches.push(matchObj);
-              }
-            }
-            curMeta = null;
-            curOpts = {};
-          }
-        }
+        this.parseM3UContent(text, feed, matchMap, matches);
       } catch (_) {}
     });
 
     await Promise.allSettled(feedPromises);
 
-    this._dynamicCache = matches;
+    this._dynamicCache    = matches;
     this._dynamicCacheTime = now;
     return matches;
   }

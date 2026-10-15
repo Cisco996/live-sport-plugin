@@ -234,7 +234,10 @@ class MatchAggregator {
       digits: (normalized.match(/\d+/g) || [])
         .filter(d => { const n = Number(d); return !(n >= 2000 && n <= 2100); })
         .sort()
-        .join(',')
+        .join(','),
+      status: e && e.status ? String(e.status) : '',
+      isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_'),
+      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels')) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_')
     };
   }
 
@@ -261,6 +264,11 @@ class MatchAggregator {
   }
 
   _sameEventPre(p1, p2) {
+    // 0. Static VOD Replays must NEVER merge with continuous 24/7 TV channels
+    if ((p1.isReplay && p2.isChannel) || (p2.isReplay && p1.isChannel)) {
+      return false;
+    }
+
     // 1. Category mismatch guard
     // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
     // while others use the parent sport name (basketball, american_football,
@@ -562,23 +570,32 @@ class MatchAggregator {
       : [];
     const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo'));
 
-    if (this.lastReplaySync === undefined && this.cacheService && this.cacheService.lastFetchTime) {
-      this.lastReplaySync = this.cacheService.lastFetchTime;
+    const cachedProviderCounts = new Map();
+    if (previousReplays.length > 0) {
+      for (const m of previousReplays) {
+        if (Array.isArray(m.sources)) {
+          for (const s of m.sources) {
+            if (s && s.source) {
+              cachedProviderCounts.set(s.source, (cachedProviderCounts.get(s.source) || 0) + 1);
+            }
+          }
+        }
+      }
     }
 
     const isReplayFresh = previousReplays.length > 0 && this.lastReplaySync && (Date.now() - this.lastReplaySync < REPLAY_SYNC_INTERVAL_MS);
 
     if (isReplayFresh) {
-      console.log(`[MatchAggregator] Reusing ${previousReplays.length} cached replay events (synced ${Math.round((Date.now() - this.lastReplaySync) / 60000)}m ago; 12h cadence). Skipping LiveTV & ReplayZone scrape.`);
+      console.log(`[MatchAggregator] Reusing ${previousReplays.length} cached replay events (synced ${Math.round((Date.now() - this.lastReplaySync) / 60000)}m ago; 12h cadence).`);
       await processProviderMatches(previousReplays);
       if (this.providerHealthService) {
         for (const provider of this.providers) {
           const name = provider && (provider.sourceName || provider.name || '');
           if (!REPLAY_PROVIDERS.has(name)) continue;
-          const count = previousReplays.filter((match) =>
-            Array.isArray(match.sources) && match.sources.some((source) => source && source.source === name)
-          ).length;
-          this.providerHealthService.recordCached(provider, count, 'Fresh replay cache reused');
+          const count = cachedProviderCounts.get(name) || 0;
+          if (count > 0) {
+            this.providerHealthService.recordCached(provider, count, 'Fresh replay cache reused');
+          }
         }
       }
       anyProviderSucceeded = true;
@@ -589,7 +606,8 @@ class MatchAggregator {
     const providersToQuery = this.providers.filter(p => {
       if (!p) return false;
       const name = p.sourceName || p.name || '';
-      if (REPLAY_PROVIDERS.has(name) && isReplayFresh) {
+      // Only skip replay provider if it was already present in fresh cache
+      if (REPLAY_PROVIDERS.has(name) && isReplayFresh && (cachedProviderCounts.get(name) || 0) > 0) {
         return false;
       }
       return true;

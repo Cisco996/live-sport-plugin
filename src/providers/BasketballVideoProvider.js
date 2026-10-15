@@ -97,6 +97,8 @@ class BasketballVideoProvider extends BaseProvider {
                           rawTitle.toLowerCase().includes(' @ ');
 
       if (!isMatchLink) continue;
+      // Drop broken placeholder links that end in multiple dashes (e.g. --- or ----)
+      if (/-{2,}$/.test(rawUrl)) continue;
 
       const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${this.baseUrl}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
       seenUrls.add(rawUrl);
@@ -208,12 +210,20 @@ class BasketballVideoProvider extends BaseProvider {
       const bodyMatch = html.match(/<!--\s*<body>\s*-->([\s\S]*?)<!--\s*<\/body>\s*-->/i);
       const content = bodyMatch ? bodyMatch[1] : html;
 
-      // Extract watch and part links
+      // Extract watch, quarter, and part links
       const linkMatches = [...content.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
       const watchLinks = linkMatches.filter(l => {
+        const dest = l[1] || '';
         const text = l[2].replace(/<[^>]+>/g, '').trim();
-        return text.includes('Watch') || text.includes('Part') || text.includes('Server');
+        const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || dest.includes('nbaontv.com') || /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+        const isVideoText = /watch|part|server|quarter|half|replay|full game/i.test(text);
+        return isVideoDest || isVideoText;
       });
+
+      const iframeMatches = [...content.matchAll(/<iframe[^>]+src="([^"]+)"/gi)];
+      for (const ifm of iframeMatches) {
+        watchLinks.push([null, ifm[1], 'Embed Player']);
+      }
 
       const byseStreams = [];
       const okStreams = [];
@@ -329,17 +339,34 @@ class BasketballVideoProvider extends BaseProvider {
         }
       };
 
-      if (Array.isArray(metaObj.videos)) {
-        for (const v of metaObj.videos) {
-          if (!v.url) continue;
-          const label = qualityMap[v.name] || v.name || 'HD';
+      const qualityWeight = {
+        'full': 1080,
+        '1080p': 1080,
+        'hd': 720,
+        '720p': 720,
+        'sd': 480,
+        '480p': 480,
+        'low': 360,
+        '360p': 360,
+        'lowest': 240,
+        '240p': 240,
+        'mobile': 144,
+        '144p': 144
+      };
+
+      if (Array.isArray(metaObj.videos) && metaObj.videos.length > 0) {
+        const validVideos = metaObj.videos.filter(v => v && v.url);
+        validVideos.sort((a, b) => (qualityWeight[b.name] || 0) - (qualityWeight[a.name] || 0));
+        const bestVideo = validVideos[0];
+        if (bestVideo) {
+          const label = qualityMap[bestVideo.name] || bestVideo.name || 'HD';
           const title = cleanPart ? `${cleanPart} (${label}) [OK.ru]` : `Full Game (${label}) [OK.ru]`;
 
           streams.push(new StreamEntity({
             name: this.name,
             title,
             resolution: label,
-            url: v.url,
+            url: bestVideo.url,
             behaviorHints: {
               notWebReady: false,
               proxyHeaders: okProxyHeaders
@@ -448,33 +475,36 @@ class BasketballVideoProvider extends BaseProvider {
       const decrypted = this._decryptBysePlayback(playback);
       if (!decrypted || !Array.isArray(decrypted.sources)) return [];
 
-      const streams = [];
+      const validSources = decrypted.sources.filter(s => s && s.url);
+      if (validSources.length === 0) return [];
+
+      validSources.sort((a, b) => {
+        const hA = parseInt(a.height || (a.label ? a.label.replace(/\D/g, '') : 0), 10) || 0;
+        const hB = parseInt(b.height || (b.label ? b.label.replace(/\D/g, '') : 0), 10) || 0;
+        return hB - hA;
+      });
+
+      const best = validSources[0];
+      const resLabel = best.label || (best.height ? `${best.height}p` : '1080p');
       const cleanPart = partName.trim();
+      const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Full Game (${resLabel}) [SprintCDN]`;
 
-      for (const s of decrypted.sources) {
-        if (!s.url) continue;
-        const resLabel = s.label || (s.height ? `${s.height}p` : '1080p');
-        const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Full Game (${resLabel}) [SprintCDN]`;
-
-        streams.push(new StreamEntity({
-          name: this.name,
-          title: streamTitle,
-          resolution: resLabel,
-          url: s.url,
-          behaviorHints: {
-            notWebReady: false,
-            proxyHeaders: {
-              request: {
-                'Origin': `https://${host}`,
-                'Referer': `https://${host}/`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
-              }
+      return [new StreamEntity({
+        name: this.name,
+        title: streamTitle,
+        resolution: resLabel,
+        url: best.url,
+        behaviorHints: {
+          notWebReady: false,
+          proxyHeaders: {
+            request: {
+              'Origin': `https://${host}`,
+              'Referer': `https://${host}/`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
             }
           }
-        }));
-      }
-
-      return streams;
+        }
+      })];
     } catch (_) {
       return [];
     }

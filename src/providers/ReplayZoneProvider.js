@@ -336,31 +336,36 @@ class ReplayZoneProvider {
      * Formats decrypted Byse sources for direct client CDN playback (0 server bandwidth).
      */
     _formatByseStreams(sources, host, partName = '') {
-        const streams = [];
-        for (const s of sources) {
-            if (!s.url) continue;
-            const resLabel = s.label || (s.height ? `${s.height}p` : '1080p');
-            const cleanPart = partName.trim();
-            const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Stream (${resLabel}) [SprintCDN]`;
+        const validSources = sources.filter(s => s && s.url);
+        if (validSources.length === 0) return [];
 
-            streams.push({
-                name: 'ReplayZone',
-                title: streamTitle,
-                resolution: resLabel,
-                url: s.url,
-                behaviorHints: {
-                    notWebReady: false,
-                    proxyHeaders: {
-                        request: {
-                            'Origin': `https://${host}`,
-                            'Referer': `https://${host}/`,
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
-                        }
+        validSources.sort((a, b) => {
+            const hA = parseInt(a.height || (a.label ? a.label.replace(/\D/g, '') : 0), 10) || 0;
+            const hB = parseInt(b.height || (b.label ? b.label.replace(/\D/g, '') : 0), 10) || 0;
+            return hB - hA;
+        });
+
+        const best = validSources[0];
+        const resLabel = best.label || (best.height ? `${best.height}p` : '1080p');
+        const cleanPart = partName.trim();
+        const streamTitle = cleanPart ? `${cleanPart} (${resLabel}) [SprintCDN]` : `Stream (${resLabel}) [SprintCDN]`;
+
+        return [{
+            name: 'ReplayZone',
+            title: streamTitle,
+            resolution: resLabel,
+            url: best.url,
+            behaviorHints: {
+                notWebReady: false,
+                proxyHeaders: {
+                    request: {
+                        'Origin': `https://${host}`,
+                        'Referer': `https://${host}/`,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
                     }
                 }
-            });
-        }
-        return streams;
+            }
+        }];
     }
 
     /**
@@ -490,20 +495,37 @@ class ReplayZoneProvider {
                 }
             };
 
-            if (Array.isArray(metaObj.videos)) {
-                for (const v of metaObj.videos) {
-                    if (!v.url) continue;
-                    const label = qualityMap[v.name] || v.name || 'HD';
+            const qualityWeight = {
+                'full': 1080,
+                '1080p': 1080,
+                'hd': 720,
+                '720p': 720,
+                'sd': 480,
+                '480p': 480,
+                'low': 360,
+                '360p': 360,
+                'lowest': 240,
+                '240p': 240,
+                'mobile': 144,
+                '144p': 144
+            };
+
+            if (Array.isArray(metaObj.videos) && metaObj.videos.length > 0) {
+                const validVideos = metaObj.videos.filter(v => v && v.url);
+                validVideos.sort((a, b) => (qualityWeight[b.name] || 0) - (qualityWeight[a.name] || 0));
+                const bestVideo = validVideos[0];
+                if (bestVideo) {
+                    const label = qualityMap[bestVideo.name] || bestVideo.name || 'HD';
                     const title = cleanPart ? `${cleanPart} (${label}) [OK.ru]` : `Replay (${label}) [OK.ru]`;
 
                     streams.push({
                         name: 'ReplayZone',
                         title,
                         resolution: label,
-                        url: v.url,
+                        url: bestVideo.url,
                         behaviorHints: {
-                          notWebReady: false,
-                          proxyHeaders: okProxyHeaders
+                            notWebReady: false,
+                            proxyHeaders: okProxyHeaders
                         }
                     });
                 }

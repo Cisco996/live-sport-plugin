@@ -701,6 +701,57 @@ async function settleBefore(promise, timeoutMs, fallback) {
   }
 }
 
+/**
+ * Resolution Deduplication — pure function, exported for direct unit-testing.
+ *
+ * When a provider serves multiple quality variants of the same stream
+ * (e.g. 240p, 360p, 480p, 720p, 1080p), keeps only the highest-resolution
+ * variant to prevent UI clutter and ensure clients play at maximum clarity.
+ * Streams without a recognised resolution tag (Auto HLS, etc.) are kept as-is.
+ *
+ * Mutates `streams` in-place and returns it for convenience.
+ *
+ * @param {Array<Object>} streams - Stremio stream objects with `name` / `title` fields
+ * @returns {Array<Object>}
+ */
+function deduplicateResolutions(streams) {
+  const RES_RANK = {
+    '1080p': 1080, '720p': 720, '540p': 540,
+    '480p': 480,   '360p': 360, '240p': 240, '144p': 144
+  };
+
+  const streamGroupMap = new Map();
+  const dedupedStreams = [];
+
+  for (const s of streams) {
+    const rawTitle = (s.title || s.name || '').toLowerCase();
+    const resM = rawTitle.match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/);
+    if (!resM) {
+      dedupedStreams.push(s);
+      continue;
+    }
+    const resTag  = resM[1];
+    const baseKey = `${s.name || ''}:${rawTitle.replace(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/g, '').replace(/[\s\(\)\[\]]+/g, ' ').trim()}`;
+    const rank    = RES_RANK[resTag] || 0;
+
+    if (!streamGroupMap.has(baseKey)) {
+      streamGroupMap.set(baseKey, { stream: s, rank, index: dedupedStreams.length });
+      dedupedStreams.push(s);
+    } else {
+      const existing = streamGroupMap.get(baseKey);
+      if (rank > existing.rank) {
+        dedupedStreams[existing.index] = s;
+        existing.stream = s;
+        existing.rank   = rank;
+      }
+    }
+  }
+
+  streams.length = 0;
+  streams.push(...dedupedStreams);
+  return streams;
+}
+
 async function handleStream(type, id, config) {
   if ((type !== 'tv' && type !== 'series' && type !== 'channel') || !id.startsWith('nuvio_sport_')) {
     return { streams: [] };
@@ -1032,6 +1083,9 @@ async function handleStream(type, id, config) {
     }
   }
 
+  // ─── Resolution Deduplication: Suppress redundant lower-bitrate variants ──
+  deduplicateResolutions(streams);
+
   // Ordering is: direct stream, then language rank, then rankScore.
   // Language rank is English (always first) -> the languages the user listed in
   // config.languages, in order -> unknown -> other known languages. With no
@@ -1117,5 +1171,8 @@ module.exports = {
   resolveSource,
   // Exported for tests: the retry/keep/drop policy is the part worth pinning
   // down, and driving it through handleStream would need the whole match cache.
-  verifyStreams
+  verifyStreams,
+  // Exported for direct unit testing of the resolution deduplication algorithm
+  // without requiring a live container / IoC / match-cache setup.
+  deduplicateResolutions
 };

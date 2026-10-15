@@ -339,8 +339,62 @@ class LiveTVProvider {
                   break;
               }
               
+              // Check for Brightcove player (NHL highlights, recaps, and game video)
+              const bcMatch = (currentUrl && currentUrl.match(/players\.brightcove\.net\/(\d+)\/([^\/]+)\/index\.html\?videoId=(\d+)/i));
+              if (bcMatch) {
+                  const bcStreams = await this._resolveBrightcove(bcMatch[1], bcMatch[3], bcMatch[2]);
+                  if (bcStreams) {
+                      if (bcStreams.hlsUrl) {
+                          streams.push({
+                              name: '⚡ Direct Stream',
+                              title: `LiveTV | ${clip.label} (Direct HLS)`,
+                              url: bcStreams.hlsUrl,
+                              behaviorHints: { notWebReady: false },
+                              _livetvReplay: true
+                          });
+                      }
+                      if (bcStreams.mp4Url) {
+                          streams.push({
+                              name: '⚡ Direct Stream',
+                              title: `LiveTV | ${clip.label} (Direct MP4)`,
+                              url: bcStreams.mp4Url,
+                              behaviorHints: { notWebReady: false },
+                              _livetvReplay: true
+                          });
+                      }
+                      break;
+                  }
+              }
+
               try {
                   const clipHtml = await httpGet(currentUrl);
+
+                  // Direct check for Brightcove in page HTML
+                  const htmlBc = clipHtml.match(/players\.brightcove\.net\/(\d+)\/([^\/]+)\/index\.html\?videoId=(\d+)/i);
+                  if (htmlBc) {
+                      const bcStreams = await this._resolveBrightcove(htmlBc[1], htmlBc[3], htmlBc[2]);
+                      if (bcStreams) {
+                          if (bcStreams.hlsUrl) {
+                              streams.push({
+                                  name: '⚡ Direct Stream',
+                                  title: `LiveTV | ${clip.label} (Direct HLS)`,
+                                  url: bcStreams.hlsUrl,
+                                  behaviorHints: { notWebReady: false },
+                                  _livetvReplay: true
+                              });
+                          }
+                          if (bcStreams.mp4Url) {
+                              streams.push({
+                                  name: '⚡ Direct Stream',
+                                  title: `LiveTV | ${clip.label} (Direct MP4)`,
+                                  url: bcStreams.mp4Url,
+                                  behaviorHints: { notWebReady: false },
+                                  _livetvReplay: true
+                              });
+                          }
+                          break;
+                      }
+                  }
                   
                   // 4. Directly extract YouTube video identifiers from fetched HTML
                   const htmlYt = clipHtml.match(/["']videoId["']\s*:\s*["']([A-Za-z0-9_-]{11})["']/) ||
@@ -452,6 +506,63 @@ class LiveTVProvider {
 
     this._streamCache.set(cacheKey, { at: Date.now(), value: streams });
     return streams;
+  }
+
+  async _resolveBrightcove(accountId, videoId, playerId = 'default') {
+    if (!this._bcPolicyKeys) this._bcPolicyKeys = new Map();
+    // Known default policy key for NHL
+    if (!this._bcPolicyKeys.has('6415718365001')) {
+      this._bcPolicyKeys.set('6415718365001', 'BCpkADawqM3l37Vq8trLJ95vVwxubXYZXYglAopEZXQTHTWX3YdalyF9xmkuknxjBgiMYwt8VZ_OZ1jAjYxz_yzuNh_cjC3uOaMspVTD-hZfNUHtNnBnhVD0Gmsih8TBF8QlQFXiCQM3W_u4ydJ1qK2Rx8ZutCUg3PHb7Q');
+    }
+
+    let policyKey = this._bcPolicyKeys.get(accountId);
+    if (!policyKey) {
+      try {
+        const playerUrl = `https://players.brightcove.net/${accountId}/${playerId}/index.html?videoId=${videoId}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+        const res = await fetch(playerUrl, { headers: { 'User-Agent': UA }, signal: ctrl.signal });
+        clearTimeout(t);
+        if (res.ok) {
+          const html = await res.text();
+          const pkMatch = html.match(/policyKey["']?\s*:\s*["']([^"']+)["']/i) || html.match(/pk:\s*["']([^"']+)["']/i);
+          if (pkMatch) {
+            policyKey = pkMatch[1];
+            this._bcPolicyKeys.set(accountId, policyKey);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!policyKey) return null;
+
+    try {
+      const apiUrl = `https://edge.api.brightcove.com/playback/v1/accounts/${accountId}/videos/${videoId}`;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(apiUrl, {
+        headers: {
+          'Accept': `application/json;pk=${policyKey}`,
+          'User-Agent': UA
+        },
+        signal: ctrl.signal
+      });
+      clearTimeout(t);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.sources || !Array.isArray(data.sources)) return null;
+
+      const hls = data.sources.find(s => s.src && s.src.startsWith('https://') && s.src.includes('.m3u8'));
+      const mp4s = data.sources.filter(s => s.src && s.src.startsWith('https://') && s.container === 'MP4');
+      mp4s.sort((a, b) => (b.avg_bitrate || b.height || 0) - (a.avg_bitrate || a.height || 0));
+
+      return {
+        hlsUrl: hls ? hls.src : null,
+        mp4Url: mp4s.length > 0 ? mp4s[0].src : null
+      };
+    } catch (_) {
+      return null;
+    }
   }
 }
 
