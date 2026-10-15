@@ -269,6 +269,20 @@ describe('SoccerFullProvider', () => {
       // 3. MatchAggregator recognizes as same event
       expect(aggregator.isSameEvent(rzMatch, sfMatch)).toBe(true);
     });
+    test('ReplayZone strictly excludes soccer entries so SoccerFull is the dedicated provider', async () => {
+      const ReplayZoneProvider = require('../src/providers/ReplayZoneProvider');
+      const rz = new ReplayZoneProvider();
+
+      // 1. resolveStream returns [] for football/soccer categories
+      const footballStream = await rz.resolveStream('https://ok.ru/video/12345', 'football', 'Coventry vs Newcastle');
+      expect(footballStream).toEqual([]);
+
+      const soccerStream = await rz.resolveStream('https://ok.ru/video/12345', 'soccer', 'Coventry vs Newcastle');
+      expect(soccerStream).toEqual([]);
+
+      // 2. resolveStream returns [] for any soccerfull.net URL regardless of category
+      const soccerfullDirect = await rz.resolveStream('https://soccerfull.net/play/16483', 'baseball', 'Coventry vs Newcastle');
+      expect(soccerfullDirect).toEqual([]);
+    });
   });
 });
-
