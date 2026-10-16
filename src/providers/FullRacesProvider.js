@@ -36,6 +36,8 @@ class FullRacesProvider extends BaseProvider {
     };
 
     this.categoryUrls = [
+      'https://fullraces.com/',
+      'https://fullraces.com/f1-race-replays',
       'https://fullraces.com/2026',
       'https://fullraces.com/indycar',
       'https://fullraces.com/nascar',

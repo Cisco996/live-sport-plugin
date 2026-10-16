@@ -344,13 +344,24 @@ function sortCatalogMatches(matches, isReplayMode = false) {
   }
 
   decorated.sort((a, b) => {
+    if (isReplayMode) {
+      if (a.kickoff > 0 && b.kickoff > 0 && a.kickoff !== b.kickoff) {
+        return b.kickoff - a.kickoff;
+      }
+      if (a.kickoff > 0 && b.kickoff === 0) return -1;
+      if (a.kickoff === 0 && b.kickoff > 0) return 1;
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.pop !== b.pop) return b.pop - a.pop;
+      return a.idx - b.idx;
+    }
+
     if (a.isLive !== b.isLive) return b.isLive - a.isLive;
     if (a.isReal !== b.isReal) return b.isReal - a.isReal;
     if (a.tier !== b.tier) return a.tier - b.tier;
     if (a.pop !== b.pop) return b.pop - a.pop;
 
     if (a.kickoff > 0 && b.kickoff > 0) {
-      if (isReplayMode || a.isLive) {
+      if (a.isLive) {
         return b.kickoff - a.kickoff;
       } else {
         return a.kickoff - b.kickoff;

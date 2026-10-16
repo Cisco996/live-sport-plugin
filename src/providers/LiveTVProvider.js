@@ -31,13 +31,19 @@ try {
 
 async function httpGet(url, { timeoutMs = 15000, attempts = 3 } = {}) {
   let lastErr;
+  const isApl = /emb\.apl\d+\.online/i.test(url);
+  const headers = {
+    'User-Agent': UA,
+    'Accept-Language': 'en-US,en;q=0.9',
+    ...(isApl ? { 'Referer': 'https://livetv.sx/', 'Origin': 'https://livetv.sx' } : {})
+  };
   for (let i = 0; i < attempts; i++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = safeFetch
-        ? await safeFetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }, timeoutMs, signal: ctrl.signal })
-        : await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }, signal: ctrl.signal });
+        ? await safeFetch(url, { headers, timeoutMs, signal: ctrl.signal })
+        : await fetch(url, { headers, signal: ctrl.signal });
       if (!res || !res.ok) throw new Error('HTTP ' + (res && res.status));
       return await res.text();
     } catch (e) {
@@ -309,7 +315,6 @@ class LiveTVProvider {
       for (const clip of clipsToProcess) {
           let currentUrl = clip.target.startsWith('//') ? 'https:' + clip.target : clip.target;
           if (currentUrl.startsWith('/')) currentUrl = MIRRORS[0] + currentUrl;
-          currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
           
           let finalUrl = currentUrl;
           let iters = 0;
@@ -412,7 +417,6 @@ class LiveTVProvider {
                       const match = clipHtml.match(/Long link:.*?(\bhttps?:\/\/[^<]+)/is) || clipHtml.match(/Long link:[^>]*>(?:[^<]*<[^>]*>)*\s*(https?:\/\/[^\s<]+)/i);
                       if (match && match[1]) {
                           currentUrl = match[1].trim();
-                          currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
                           continue;
                       }
                   }
@@ -420,7 +424,6 @@ class LiveTVProvider {
                   const trimmed = clipHtml.trim();
                   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
                       currentUrl = await unshorten(trimmed);
-                      currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
                       continue;
                   }
                   
@@ -430,7 +433,6 @@ class LiveTVProvider {
                       // Filter out Google account / signin iframes
                       if (!iframeSrc.includes('/v3/signin') && !iframeSrc.includes('accounts.google.com')) {
                           currentUrl = await unshorten(iframeSrc);
-                          currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
                           continue;
                       }
                   }

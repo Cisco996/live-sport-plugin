@@ -81,6 +81,10 @@ function _compoundify(t) {
     // "Azerbaijan Grand Prix". "GP" also normalised to "grandprix" to help
     // track-event titles collapse regardless of whether GP is spelled out.
     [/\bformula\s*(?:one|1)\b|\bf[- ]?1\b/g, 'formulaone'],
+    [/\bformula\s*(?:two|2)\b|\bf[- ]?2\b/g, 'formulatwo'],
+    [/\bformula\s*(?:three|3)\b|\bf[- ]?3\b/g, 'formulathree'],
+    [/\bformula\s*(?:four|4)\b|\bf[- ]?4\b/g, 'formulafour'],
+    [/\bformula\s*e\b|\bformula-e\b/g, 'formulae'],
     [/\bgrand\s*prix\b|\bgp\b/g, 'grandprix'],
     // Football (Soccer)
     [/\bman(chester)?\s*utd\b|\bmanchester\s*united\b/g, 'manchesterunited'],
@@ -88,7 +92,7 @@ function _compoundify(t) {
     [/\bman(chester)?\s*city\b/g, 'manchestercity'],
     [/\bspurs\b|\btottenham(\s*hotspur)?\b/g, 'tottenham'],
     [/\bwolves\b|\bwolverhampton(\s*wanderers)?\b/g, 'wolverhampton'],
-    [/\bpsg\b|\bparis\s*(saint|st)\s*germain\b/g, 'psg'],
+    [/\bpsg\b|\bparis[\s\-–—]*(saint|st)[\s\-–—]*germain\b/g, 'psg'],
     [/\bbayern(\s*m[uü]nchen)?\b|\bbayern\s*munich\b/g, 'bayernmunich'],
     [/\batl(etico)?\s*madrid\b/g, 'atleticomadrid'],
     [/\breal\s*madrid\b|\br\s*madrid\b/g, 'realmadrid'],
@@ -216,12 +220,118 @@ function _teamsSimilar(a, b) {
   return minLen > 0 && (common / minLen) >= 0.7;
 }
 
+const MOTORSPORT_GENERICS = new Set([
+  'grandprix', 'gp', 'formulaone', 'formulatwo', 'formulathree', 'formulafour', 'formulae',
+  'f1', 'f2', 'f3', 'f4', 'fe', 'motogp', 'moto2', 'moto3', 'nascar', 'xfinity', 'indycar', 'wsbk', 'wrc', 'dtm', 'rally', 'superbike',
+  'race', 'sunday', 'saturday', 'friday', 'thursday', 'wednesday', 'tuesday', 'monday',
+  'practice', 'qualifying', 'sprint', 'championship', 'world', 'cup',
+  'full', 'replay', 'show', 'season', 'review', 'series', 'day',
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december'
+]);
+
+function _extractMotorsportSeries(title, league = '') {
+  const t = _foldText(title || '').toLowerCase();
+  const l = _foldText(league || '').toLowerCase();
+
+  const matchSeries = (str) => {
+    if (!str) return null;
+    if (/\bf1\s*academy\b|\bformula\s*4\b|\bf4\b/i.test(str)) return 'f4';
+    if (/\bformula\s*e\b|\bformula-e\b|\be-prix\b|\beprix\b/i.test(str)) return 'fe';
+    if (/\bformula\s*(?:two|2)\b|\bf[- ]?2\b/i.test(str)) return 'f2';
+    if (/\bformula\s*(?:three|3)\b|\bf[- ]?3\b/i.test(str)) return 'f3';
+    if (/\bformula\s*(?:one|1)\b|\bf[- ]?1\b|\bformulaone\b/i.test(str)) return 'f1';
+    if (/\bnascar\s*xfinity\b|\bxfinity\s*series\b|\bxfinity\b/i.test(str)) return 'nascar_xfinity';
+    if (/\bnascar\s*craftsman\s*truck\b|\bcraftsman\s*truck\b|\btruck\s*series\b|\bnascar\s*truck\b/i.test(str)) return 'nascar_truck';
+    if (/\bnascar\b|\bcup\s*series\b|\bmonster\s*energy\s*cup\b|\bsprint\s*cup\b/i.test(str)) return 'nascar';
+    if (/\bindycar\b|\bindy\s*500\b|\bindianapolis\s*500\b/i.test(str)) return 'indycar';
+    if (/\bmoto\s*2\b|\bmoto2\b/i.test(str)) return 'moto2';
+    if (/\bmoto\s*3\b|\bmoto3\b/i.test(str)) return 'moto3';
+    if (/\bmotogp\b/i.test(str)) return 'motogp';
+    if (/\bwsbk\b|\bworld\s*superbike\b|\bsuperbike\b/i.test(str)) return 'wsbk';
+    if (/\bwrc\b|\bworld\s*rally\b/i.test(str)) return 'wrc';
+    if (/\bdtm\b/i.test(str)) return 'dtm';
+    return null;
+  };
+
+  const fromTitle = matchSeries(t);
+  if (fromTitle) return fromTitle;
+  const fromLeague = matchSeries(l);
+  if (fromLeague) return fromLeague;
+
+  if (/\brally\b/i.test(t) || /\brally\b/i.test(l)) return 'wrc';
+
+  return 'other';
+}
+
+function _extractMotorsportSession(title) {
+  if (!title) return 'race';
+  const s = _foldText(title).toLowerCase();
+
+  // 1. Season Review
+  if (/\b(?:season|year)\s*in\s*review\b|\bseason\s*review\b/i.test(s)) {
+    return 'season_review';
+  }
+
+  // 2. Pre / Post race / Shows / Media
+  if (/\bpre[\s-]race\b|\bthe\s*f1\s*show\b|\bf1\s*show\b|\bpaddock\s*uncut\b|\bpaddock\b|\bpreview\b|\bpress\s*conference\b/i.test(s)) {
+    return 'pre_race';
+  }
+  if (/\bpost[\s-]race\b|\bchequered\s*flag\b|\bafter\s*the\s*flag\b/i.test(s)) {
+    return 'post_race';
+  }
+
+  // 3. Testing & Shakedown days
+  const isTestingOrShakedown = /\b(?:test|testing|shakedown)\b/i.test(s);
+  const dayMatch = s.match(/\bday[\s-]?([1-4])\b/i);
+  if (dayMatch && (isTestingOrShakedown || !/\b(?:practice|qualifying|sprint|race)\b/i.test(s))) {
+    return `day_${dayMatch[1]}`;
+  }
+  if (isTestingOrShakedown) {
+    return 'testing';
+  }
+
+  // 4. Practice sessions (FP1 - FP4)
+  if (/\b(?:1st|first)\s*(?:free\s*)?practice\b|\b(?:free\s*)?practice\s*1\b|\bfp\s*1\b/i.test(s)) return 'p1';
+  if (/\b(?:2nd|second)\s*(?:free\s*)?practice\b|\b(?:free\s*)?practice\s*2\b|\bfp\s*2\b/i.test(s)) return 'p2';
+  if (/\b(?:3rd|third)\s*(?:free\s*)?practice\b|\b(?:free\s*)?practice\s*3\b|\bfp\s*3\b/i.test(s)) return 'p3';
+  if (/\b(?:4th|fourth)\s*(?:free\s*)?practice\b|\b(?:free\s*)?practice\s*4\b|\bfp\s*4\b/i.test(s)) return 'p4';
+
+  // 5. Sprint Qualifying / Shootout
+  if (/\bsprint\s*(?:shootout|qualifying)\b|\bsq\s*[1-3]?\b/i.test(s)) {
+    return 'sprint_qualifying';
+  }
+
+  // 6. Sprint (Race)
+  if (/\bsprint(?:\s*race)?\b/i.test(s)) {
+    return 'sprint';
+  }
+
+  // 7. Qualifying
+  if (/\bqualifying\b|\bshootout\b|\bpole\s*position\b/i.test(s)) {
+    return 'qualifying';
+  }
+
+  // 8. Generic Practice
+  if (/\b(?:free\s*)?practice\b/i.test(s)) {
+    return 'practice';
+  }
+
+  // 9. Main Race (Default for motorsport events)
+  return 'race';
+}
+
 /**
  * Try to split a match title into [team1, team2] using common separators.
  * Returns null if the title doesn't look like a "team1 vs team2" fixture.
  */
 function _tryExtractTeams(title) {
+  if (!title) return null;
   const clean = _compoundify(_stripNoise(_foldText(title)));
+  // Return null for motorsport events so race titles are never parsed as dual-team fixtures
+  if (_extractMotorsportSeries(title) !== 'other' || /\b(?:grandprix|formulaone|formulatwo|formulathree|formulafour|formulae|motogp|nascar|indycar|wsbk|wrc|dtm|rally|practice|qualifying|sprint)\b/i.test(clean)) {
+    return null;
+  }
   const parts = clean.split(/\s(?:vs?\.?|@|[-–—])\s/i);
   if (parts.length === 2) {
     return [_tokenize(parts[0]).join(' '), _tokenize(parts[1]).join(' ')];
@@ -243,6 +353,14 @@ class MatchAggregator {
     if (this.providerHealthService) this.providerHealthService.registerProviders(this.providers);
   }
 
+  _extractMotorsportSeries(title, league) {
+    return _extractMotorsportSeries(title, league);
+  }
+
+  _extractMotorsportSession(title) {
+    return _extractMotorsportSession(title);
+  }
+
   /**
    * Precompute everything isSameEvent needs ONCE per match. The merge loop is
    * O(N^2) in pair comparisons; doing the regex-heavy normalization here instead
@@ -252,13 +370,17 @@ class MatchAggregator {
     const title = e && e.title ? _foldText(e.title) : '';
     const id = e && e.id != null ? String(e.id) : '';
     const normalized = _compoundify(_stripNoise(title));
+    const motorsportSeries = _extractMotorsportSeries(title, e && e.league);
+    const isMotorsport = (this._normalizeCategory(e && e.category) === 'motorsport') || motorsportSeries !== 'other';
     return {
       id,
       category: e && e.category ? String(e.category) : '',
       date: _parseEventDate(e && e.date),
-      teams: _tryExtractTeams(title),
+      teams: isMotorsport ? null : _tryExtractTeams(title),
       tokens: new Set(_tokenize(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
       norm: normalized.replace(/\s+/g, ' ').trim(),
+      motorsportSeries,
+      motorsportSession: _extractMotorsportSession(title),
       // Extract digits from the NORMALIZED form so compound tokens like
       // "formulaone" don't leave a stray "1". Also strip 4-digit calendar
       // years (2020–2099) since providers sometimes brand titles with the
@@ -314,14 +436,43 @@ class MatchAggregator {
     if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeFootball) {
       return false;
     }
+
+    // Motorsport cross-category guard: motorsport events must NEVER merge with non-motorsport events
+    const isMoto1 = c1 === 'motorsport' || p1.motorsportSeries !== 'other';
+    const isMoto2 = c2 === 'motorsport' || p2.motorsportSeries !== 'other';
+    if ((isMoto1 && !isMoto2) || (!isMoto1 && isMoto2)) {
+      return false;
+    }
+
     // 2. Exact ID match
     if (p1.id && p2.id && p1.id === p2.id) return true;
-    // 3. Date window guard — events more than 24h apart are definitely different
-    if (p1.date && p2.date && Math.abs(p1.date - p2.date) > 86400000) return false;
+
+    // 3. Date window & motorsport identity guards
+    if (isMoto1 && isMoto2) {
+      // 3a. Series isolation: different series never merge
+      if (p1.motorsportSeries !== p2.motorsportSeries && p1.motorsportSeries !== 'other' && p2.motorsportSeries !== 'other') {
+        return false;
+      }
+      // 3b. Session isolation: distinct sessions never merge
+      if (p1.motorsportSession !== p2.motorsportSession) {
+        return false;
+      }
+      // 3c. Date guard: date-0 or missing date cannot bypass date comparison
+      if (!p1.date || !p2.date || p1.date <= 0 || p2.date <= 0) {
+        if (p1.norm !== p2.norm) return false;
+      } else if (Math.abs(p1.date - p2.date) > 48 * 3600 * 1000) {
+        // Events > 48 hours apart never merge for motorsport
+        return false;
+      }
+    } else {
+      // Standard date window guard — events more than 24h apart (or 4 days for replays) are definitely different
+      const maxDateDiff = (p1.isReplay && p2.isReplay) ? 345600000 : 86400000;
+      if (p1.date && p2.date && Math.abs(p1.date - p2.date) > maxDateDiff) return false;
+    }
 
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
     //    BOTH teams to independently fuzzy-match. (Skip for motorsport which has no teams).
-    if (p1.teams && p2.teams && c1 !== 'motorsport' && c2 !== 'motorsport') {
+    if (p1.teams && p2.teams && !isMoto1 && !isMoto2) {
       const fwd = _teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]);
       const rev = _teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]);
       return fwd || rev;
@@ -332,17 +483,15 @@ class MatchAggregator {
     if (p1.tokens.size === 0 || p2.tokens.size === 0) return false;
 
     // Digit signatures must agree: "beIN 1" vs "beIN 2", "Court 13" vs "Court 7"
-    // are different channels/events even when the words are identical. (Skip for motorsport Grand Prix).
-    const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('motogp') || t.has('nascar') || t.has('rally');
-    const cIsMoto = c1 === 'motorsport' || c2 === 'motorsport';
-    if (!cIsMoto || !(isGrandPrix(p1.tokens) && isGrandPrix(p2.tokens))) {
+    // are different channels/events even when the words are identical.
+    if (!isMoto1 && !isMoto2) {
       if (p1.digits !== p2.digits) return false;
     }
 
     // 6a. One fixture + one channel-like listing: the channel-like tokens must be
     //     a subset of the fixture tokens ("Real Madrid live" ⊂ "Real Madrid vs
     //     Barcelona"). This keeps single-team listings merging with the fixture.
-    if ((p1.teams || p2.teams) && !cIsMoto) {
+    if ((p1.teams || p2.teams) && !isMoto1 && !isMoto2) {
       const channel = p1.teams ? p2 : p1;
       const fixture = p1.teams ? p1 : p2;
       for (const w of channel.tokens) if (!fixture.tokens.has(w)) return false;
@@ -353,15 +502,15 @@ class MatchAggregator {
     //     branding must never merge.
     if (p1.norm === p2.norm) return true;
 
-    // 6c. Motorsport specific fallback: Formula 1, MotoGP, etc.
-    // e.g. "Bahrain Grand Prix - Race" vs "Formula 1 Bahrain Grand Prix in Malaysia"
-    if (c1 === 'motorsport' || c2 === 'motorsport') {
-      const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('motogp') || t.has('nascar') || t.has('rally');
+    // 6c. Motorsport specific fallback: Formula 1, MotoGP, NASCAR, etc.
+    // e.g. "RACE - F1 2026 - Singapore Grand Prix Full Race Replay" vs "Formula 1 Singapore Grand Prix 2026 Race Replay"
+    if (isMoto1 && isMoto2) {
+      const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('formulatwo') || t.has('formulathree') || t.has('formulafour') || t.has('formulae') || t.has('motogp') || t.has('moto2') || t.has('moto3') || t.has('nascar') || t.has('rally') || t.has('indycar') || t.has('dtm') || t.has('wsbk') || t.has('superbike');
       if (isGrandPrix(p1.tokens) && isGrandPrix(p2.tokens)) {
-        const generics = new Set(['grandprix', 'gp', 'formulaone', 'f1', 'motogp', 'nascar', 'rally', 'race', 'sunday', 'saturday', 'friday', 'practice', 'qualifying', 'sprint', 'championship', 'world', 'cup']);
-        const specificShared = [...p1.tokens].filter(x => p2.tokens.has(x) && !generics.has(x) && isNaN(x));
+        const specificShared = [...p1.tokens].filter(x => p2.tokens.has(x) && !MOTORSPORT_GENERICS.has(x) && isNaN(x));
         if (specificShared.length >= 1) return true;
       }
+      return false; // Motorsport never falls through to loose subset/Jaccard
     }
 
     // Subset check: if one token set is entirely contained in the other (minimum
@@ -453,15 +602,21 @@ class MatchAggregator {
         const pre = this._precompute(match);
         let idx = -1;
 
-        // 1. Fast O(1) Exact ID & Alias check
+        // 1. Fast O(1) Exact ID & Alias check with identity verification
+        let candIdx = -1;
         if (match.id && idIndex.has(match.id)) {
-          idx = idIndex.get(match.id);
+          candIdx = idIndex.get(match.id);
         } else if (Array.isArray(match.aliasIds)) {
           for (const aid of match.aliasIds) {
             if (aid && idIndex.has(aid)) {
-              idx = idIndex.get(aid);
+              candIdx = idIndex.get(aid);
               break;
             }
+          }
+        }
+        if (candIdx !== -1) {
+          if (this._sameEventPre(finalPres[candIdx], pre)) {
+            idx = candIdx;
           }
         }
 
@@ -500,8 +655,9 @@ class MatchAggregator {
               // If fixture has multiple tokens, require at least 2 shared tokens to test
               if (sharedCount < 2 && pre.tokens.size > 2) continue;
               const pCand = finalPres[cIdx];
-              // Date-window early exit: events > 24 hours apart never merge
-              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > 86400000) continue;
+              // Date-window early exit: events > 24 hours apart (or 4 days for replays) never merge
+              const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
+              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
               if (this._sameEventPre(pCand, pre)) {
                 idx = cIdx;
                 break;
@@ -521,7 +677,8 @@ class MatchAggregator {
             // 'other' cross-matches with date window guard
             for (let i = finalMatches.length - 1; i >= 0; i--) {
               const pCand = finalPres[i];
-              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > 86400000) continue;
+              const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
+              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
               if (this._sameEventPre(pCand, pre)) { idx = i; break; }
             }
           } else {
@@ -539,7 +696,8 @@ class MatchAggregator {
                 if (checkedIndices.has(i)) continue;
                 checkedIndices.add(i);
                 const pCand = finalPres[i];
-                if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > 86400000) continue;
+                const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
+                if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
                 if (this._sameEventPre(pCand, pre)) {
                   idx = i;
                   break;
@@ -551,6 +709,12 @@ class MatchAggregator {
         }
 
         if (idx === -1) {
+          // If a standalone replay match has no date, give it today's date (YYYY-MM-DD)
+          // so it sorts at the top of replays and is accessible via date filters/hubs
+          if (!match.date && pre.isReplay) {
+            match.date = new Date().toISOString().slice(0, 10);
+            pre.date = new Date(match.date).getTime();
+          }
           const newIdx = finalMatches.length;
           finalMatches.push(match);
           finalPres.push(pre);
@@ -650,7 +814,8 @@ class MatchAggregator {
         // Canonical naming: prefer a team-vs-team fixture title over a
         // channel-like listing title, so the merged event keeps the most
         // informative name regardless of which provider arrived first.
-        if (!existing._titleIsFixture && pre.teams) {
+        // Never overwrite motorsport titles with incoming secondary titles.
+        if (!existing._titleIsFixture && pre.teams && pre.motorsportSeries === 'other' && existing.category !== 'motorsport') {
           existing.title = match.title;
           existing._titleIsFixture = true;
           finalPres[idx] = pre;

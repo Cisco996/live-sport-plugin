@@ -1,7 +1,15 @@
+const crypto = require('crypto');
 const undici = require('undici');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+
+function b64Decode(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const rem = b64.length % 4;
+  if (rem !== 0) b64 += '='.repeat(4 - rem);
+  return Buffer.from(b64, 'base64');
+}
 
 class SoccerFullProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -16,6 +24,7 @@ class SoccerFullProvider extends BaseProvider {
     // In-memory bounded caches to prevent repeated network hops
     this._matchPageCache = new Map();
     this._streamCache = new Map();
+    this._byseCache = new Map();
     this._maxCacheEntries = 500;
 
     // Circuit breaker wrappers if circuit breaker is available
@@ -125,11 +134,7 @@ class SoccerFullProvider extends BaseProvider {
         }
       }
 
-      // If no explicit date in slug, leave date empty (''):
-      // 1. Authoritative replay qualification is guaranteed by status: 'finished'.
-      // 2. Leaving date unanchored prevents MatchAggregator's 24h guard from
-      //    spuriously rejecting merges with real fixtures (ReplayZone, LiveTV, StreamedPk).
-      //    The merged event will automatically inherit the real kickoff timestamp.
+      // If no explicit date in slug, leave empty for unanchored upstream fixture merge
       const matchDate = dateMs ? String(dateMs) : '';
 
       // Extract numeric ID if present
@@ -263,7 +268,7 @@ class SoccerFullProvider extends BaseProvider {
     const seenSids = new Set();
 
     // 1. Parse video-server buttons: <a href="...?sid=16484" class="video-server ...">1st Half</a>
-    const btnRegex = /<a[^>]+href="[^"]*?[?&]sid=(\d+)"[^>]*class="[^"]*video-server[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+    const btnRegex = /<a\s+[^>]*href=["'][^"']*[?&]sid=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = btnRegex.exec(html)) !== null) {
       const sid = m[1];
@@ -358,6 +363,13 @@ class SoccerFullProvider extends BaseProvider {
           }));
         }
       }
+      // C. Byse / SprintCDN host (bysefujedu.com, bysesukior.com, byse*, filemoon)
+      else if (/byse|bysesukior|bysefujedu|filemoon/i.test(iframeSrc)) {
+        const byseStreams = await this.extractByse(iframeSrc, label);
+        if (Array.isArray(byseStreams) && byseStreams.length > 0) {
+          streams.push(...byseStreams);
+        }
+      }
 
       if (streams.length > 0) {
         this._setCache(this._streamCache, playUrl, streams, 30 * 60 * 1000);
@@ -367,6 +379,107 @@ class SoccerFullProvider extends BaseProvider {
     } catch (err) {
       return [];
     }
+  }
+
+  _decryptBysePlayback(playback) {
+    if (!playback || !playback.payload || !playback.iv || !Array.isArray(playback.key_parts)) {
+      return null;
+    }
+    try {
+      const version = parseInt(playback.version, 10);
+      let keyParts = playback.key_parts;
+      if (!isNaN(version) && version >= 1 && version <= 20) {
+        const idx1 = version - 1;
+        const idx2 = (31 - version) - 1;
+        if (playback.key_parts[idx1] && playback.key_parts[idx2]) {
+          keyParts = [playback.key_parts[idx1], playback.key_parts[idx2]];
+        }
+      }
+      const key = Buffer.concat(keyParts.map(b64Decode));
+      if (key.length !== 32) return null;
+
+      const iv = b64Decode(playback.iv);
+      const payload = b64Decode(playback.payload);
+      if (payload.length < 16) return null;
+
+      const ciphertext = payload.subarray(0, payload.length - 16);
+      const authTag = payload.subarray(payload.length - 16);
+
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(authTag);
+
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return JSON.parse(decrypted.toString('utf8'));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async extractByse(embedUrl, partName = '') {
+    try {
+      const u = new URL(embedUrl);
+      const host = u.hostname;
+      const pathParts = u.pathname.split('/').filter(Boolean);
+      const code = pathParts[pathParts.length - 1];
+      if (!code) return [];
+
+      const cacheKey = `${host}:${code}`;
+      const cached = this._byseCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return this._formatByseStreams(cached.sources, host, partName);
+      }
+
+      const apiUrl = `https://${host}/api/videos/${code}/`;
+      const res = await undici.request(apiUrl, {
+        headers: {
+          'User-Agent': this.defaultHeaders['User-Agent'],
+          'Referer': `https://${host}/e/${code}`,
+          'Origin': `https://${host}`,
+          'Accept': 'application/json, text/plain, */*'
+        }
+      });
+
+      if (res.statusCode !== 200) return [];
+      const json = await res.body.json();
+      if (!json || !json.playback) return [];
+
+      const decrypted = this._decryptBysePlayback(json.playback);
+      if (!decrypted || !Array.isArray(decrypted.sources)) return [];
+
+      this._byseCache.set(cacheKey, {
+        sources: decrypted.sources,
+        expiresAt: Date.now() + 10 * 60 * 1000
+      });
+
+      return this._formatByseStreams(decrypted.sources, host, partName);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  _formatByseStreams(sources, host, partName) {
+    if (!Array.isArray(sources) || sources.length === 0) return [];
+    const best = sources.find(s => s.label === '1080p') || sources[0];
+    if (!best || !best.url) return [];
+
+    const cleanPart = this._formatPartLabel(partName);
+    const title = cleanPart ? `SoccerFull | ${cleanPart} (1080p) [SprintCDN]` : `SoccerFull | Full Match (1080p) [SprintCDN]`;
+
+    return [new StreamEntity({
+      name: 'SoccerFull',
+      title,
+      resolution: best.label || '1080p',
+      url: best.url,
+      behaviorHints: {
+        notWebReady: false,
+        proxyHeaders: {
+          request: {
+            'Origin': `https://${host}`,
+            'Referer': `https://${host}/`
+          }
+        }
+      }
+    })];
   }
 
   /**

@@ -77,6 +77,7 @@ class SkTechChannelResolver {
               const subTitle = (sub.title || '').trim();
               if (/^test\b|^demo\b|^placeholder\b/i.test(subTitle)) continue;
               if (/test/i.test(sub.links || '')) continue;
+              if (/\b(?:vs|v)\b/i.test(subTitle) && !/\bversus\b/i.test(subTitle)) continue;
               channels.push({
                 id: `sktech_ch_cust_${i}_${j}`,
                 title: sub.title || `${name} - ${j + 1}`,
@@ -131,6 +132,7 @@ class SkTechChannelResolver {
             for (let j = 0; j < selectedChannels.length; j++) {
               const sub = selectedChannels[j];
               if (sub.drmScheme || (sub.url && sub.url.includes('.mpd'))) continue;
+              if (/\b(?:vs|v)\b/i.test(sub.title || '') && !/\bversus\b/i.test(sub.title || '')) continue;
               let channelGroup = sub.group || defaultGroup;
               if (defaultGroup === 'USA TV') {
                 if (/sport|espn|btn|ncaa|peacock|ppv|nhl|ahl|mlb|nba|nfl|mls|fight/i.test(sub.group || '')) {

@@ -785,11 +785,37 @@ async function handleStream(type, id, config) {
 
   let candidateSources = match.sources;
   if (!isHubEpisode && episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
-    const isMultiPart = match.sources.some(s => s.name && /(part|half|period)\s*\d+/i.test(s.name));
+    const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
+    const isMultiPart = cleanSources.some(s => s.name && /(part|half|period)\s*\d+/i.test(s.name));
     if (isMultiPart) {
-      const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
-      if (cleanSources[episodeIndex - 1]) {
-        candidateSources = [cleanSources[episodeIndex - 1]];
+      // Group by provider so a multi-source match (e.g. LiveTV clips + SoccerFull full match page)
+      // retains all providers rather than discarding non-LiveTV providers.
+      const selected = [];
+      const byProvider = new Map();
+      for (const s of cleanSources) {
+        const prov = s.source || 'other';
+        if (!byProvider.has(prov)) byProvider.set(prov, []);
+        byProvider.get(prov).push(s);
+      }
+      for (const [prov, pSources] of byProvider.entries()) {
+        if (pSources.length === 1) {
+          // Single source provider (e.g. SoccerFull match page) contains full match or all parts
+          selected.push(pSources[0]);
+        } else {
+          // Provider with multiple parts/clips: pick the one for this episode
+          if (pSources[episodeIndex - 1]) {
+            selected.push(pSources[episodeIndex - 1]);
+          } else {
+            // Fallback: search for explicit part/half matching episodeIndex
+            const epRegex = new RegExp(`(?:part|half|period)\\s*${episodeIndex}\\b`, 'i');
+            const found = pSources.find(s => s.name && epRegex.test(s.name));
+            if (found) selected.push(found);
+            else if (pSources.length > 0) selected.push(pSources[0]);
+          }
+        }
+      }
+      if (selected.length > 0) {
+        candidateSources = selected;
       }
     }
   }
@@ -1044,8 +1070,8 @@ async function handleStream(type, id, config) {
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
     
-    // If it's a direct m3u8 stream and not routed through our proxy, mark it notWebReady
-    if (s.url && s.url.includes('.m3u8') && !s.url.includes('/api/manifest')) {
+    // If it's a direct m3u8 stream and not routed through our proxy, mark it notWebReady (unless explicitly web-ready like SprintCDN)
+    if (s.url && s.url.includes('.m3u8') && !s.url.includes('/api/manifest') && s.behaviorHints.notWebReady !== false) {
       s.behaviorHints.notWebReady = true;
       
       let referer = '';
