@@ -356,7 +356,7 @@ function _tryExtractTeams(title) {
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, providerHealthService }) {
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, providerHealthService } = {}) {
     this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
@@ -419,7 +419,7 @@ class MatchAggregator {
         .join(','),
       status: e && e.status ? String(e.status) : '',
       isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'),
-      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels')) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_')
+      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_')
     };
   }
 
@@ -448,6 +448,12 @@ class MatchAggregator {
   _sameEventPre(p1, p2) {
     // 0. Static VOD Replays must NEVER merge with continuous 24/7 TV channels or live fixtures
     if ((p1.isReplay && (p2.isChannel || !p2.isReplay)) || (p2.isReplay && (p1.isChannel || !p1.isReplay))) {
+      return false;
+    }
+
+    // 0b. SKTech continuous 24/7 TV channels must NEVER merge with scheduled fixtures (and vice versa)
+    const isSktechChannel = (p1.id && p1.id.startsWith('sktech_ch_')) || (p2.id && p2.id.startsWith('sktech_ch_'));
+    if (isSktechChannel && (p1.isChannel !== p2.isChannel)) {
       return false;
     }
 
@@ -800,9 +806,9 @@ class MatchAggregator {
           });
         }
         if (match.popular === '1') existing.popular = '1';
-        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st') && !match.poster.includes('unique-tournament')) existing.poster = match.poster;
-        if (!existing.logo && match.logo && !match.logo.includes('ppvservices.st') && !match.logo.includes('unique-tournament')) existing.logo = match.logo;
-        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st') && !match.thumbnail_url.includes('unique-tournament')) existing.thumbnail_url = match.thumbnail_url;
+        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st') && !match.poster.includes('unique-tournament') && !match.poster.includes('ondemand.st')) existing.poster = match.poster;
+        if (!existing.logo && match.logo && !match.logo.includes('ppvservices.st') && !match.logo.includes('unique-tournament') && !match.logo.includes('ondemand.st')) existing.logo = match.logo;
+        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st') && !match.thumbnail_url.includes('unique-tournament') && !match.thumbnail_url.includes('ondemand.st')) existing.thumbnail_url = match.thumbnail_url;
         if (existing.category === 'networks' || match.category === 'networks') existing.poster = '';
         // Carry a live score across the merge the same way artwork is carried.
         // A later provider that reports a score wins over an earlier blank.

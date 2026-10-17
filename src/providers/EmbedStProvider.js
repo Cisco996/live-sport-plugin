@@ -34,6 +34,8 @@ class EmbedStProvider extends BaseProvider {
 
     // CF Worker edge-scraper removed per user request
 
+    let targetEmbedUrl = embedUrl;
+
     // ─── Tier 0: Iframe redirect detection ───────────────────────────────────
     // Some embed.st pages (e.g. dead channels like rally-tv) swap their native 
     // stream for an <iframe src="https://embedindia.st/..."> fallback.
@@ -56,6 +58,33 @@ class EmbedStProvider extends BaseProvider {
           headersTimeout: 6000
         });
         const html = await htmlRes.text();
+
+        // Check for rockyembed.st nested wrapper iframe (e.g. golf streams rerouting to live ingest)
+        const rockyMatch = html.match(/src="([^"]*rockyembed\.st[^"]*)"/i);
+        if (rockyMatch) {
+          try {
+            const rockyUrl = rockyMatch[1];
+            const rockyRes = await safeFetch(rockyUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                'Referer': embedUrl
+              },
+              timeoutMs: 6000
+            });
+            if (rockyRes.status === 200) {
+              const rockyHtml = await rockyRes.text();
+              const atobMatch = rockyHtml.match(/atob\((?:'|")([^'"]+)(?:'|")\)/);
+              if (atobMatch) {
+                const decoded = Buffer.from(atobMatch[1], 'base64').toString('utf8');
+                targetEmbedUrl = decoded.split('#')[0].replace(/\/+$/, '');
+                console.log(`[${this.name}] Unwrapped rockyembed target -> ${targetEmbedUrl} for ${matchTitle}`);
+              }
+            }
+          } catch (err) {
+            console.warn(`[${this.name}] rockyembed unwrap failed: ${err.message}`);
+          }
+        }
+
         // Match <iframe src="https://embedindia.st/..."> pattern
         const iframeMatch = html.match(/src="(https:\/\/([^/"]+)[^"]+)"/g);
         if (iframeMatch) {
@@ -100,19 +129,19 @@ class EmbedStProvider extends BaseProvider {
     // ─── Tier 1: Native WASM decryption ─────────────────────────────────────
     if (streams.length === 0) {
       try {
-        // Parse the user, event, id from the URL: https://embed.st/embed/admin/ppv-celtic-vs-lask-linz/1
-        const parts = embedUrl.split('/');
+        // Parse the user, event, id from targetEmbedUrl: https://embed.st/embed/admin/ppv-celtic-vs-lask-linz/1
+        const parts = targetEmbedUrl.split('#')[0].replace(/\/+$/, '').split('/').filter(Boolean);
         const user  = parts[parts.length - 3];
         const event = parts[parts.length - 2];
         const id    = parts[parts.length - 1];
 
-        if (user && event && id && !embedUrl.includes('sportsembed.su')) {
+        if (user && event && id && !targetEmbedUrl.includes('sportsembed.su')) {
           console.log(`[${this.name}] Decrypting native WASM for ${user}/${event}/${id}...`);
 
           const m3u8Url = await new Promise((resolve) => {
             // Using __dirname ensures it works when bundled by ncc into dist/
             const scriptPath = path.join(__dirname, 'run_wasm_native.js');
-            execFile('node', [scriptPath, user, event, id, embedUrl], { timeout: 15000 }, (error, stdout) => {
+            execFile('node', [scriptPath, user, event, id, targetEmbedUrl], { timeout: 15000 }, (error, stdout) => {
               if (error) {
                 console.error(`[${this.name}] Native WASM execution failed:`, error.message);
                 return resolve(null);
@@ -170,7 +199,7 @@ class EmbedStProvider extends BaseProvider {
     streams.push(new StreamEntity({
       name: 'EmbedSt',
       title: `${matchTitle} (Web Player)`,
-      externalUrl: `/watch?url=${encodeURIComponent(embedUrl)}&title=${encodeURIComponent(matchTitle || 'Live Event')}`,
+      externalUrl: `/watch?url=${encodeURIComponent(targetEmbedUrl || embedUrl)}&title=${encodeURIComponent(matchTitle || 'Live Event')}`,
     }));
 
     return streams;
