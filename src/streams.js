@@ -445,8 +445,16 @@ function repairRefererFor(targetUrl) {
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
+    if (!s || !s.url) return null;
+
+    // Filter out broken/dead SprintCDN links (edge*-*-sprintcdn.*) which fail on user devices
+    if (s.url.includes('sprintcdn')) {
+      console.log(`[Filter] Dropped SprintCDN stream (IP/ASN bound): ${s.url}`);
+      return null;
+    }
+
     // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -804,7 +812,25 @@ async function handleStream(type, id, config) {
   let candidateSources = match.sources;
   if (!isHubEpisode && episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
     const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
-    const isMultiPart = cleanSources.some(s => s.name && /(part|half|period)\s*\d+/i.test(s.name));
+    // Prioritize dedicated full replay providers and ordered parts over goal clips
+    const getReplaySourceRank = (s) => {
+      const name = (s.name || '').toLowerCase();
+      const prov = s.source || '';
+      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays') {
+        if (/part\s*1|1st\s*half|full/i.test(name)) return 1;
+        if (/part\s*2|2nd\s*half/i.test(name)) return 2;
+        return 3;
+      }
+      if (/full\s*match|full\s*replay/i.test(name)) return 4;
+      if (/part\s*1|1st\s*half/i.test(name)) return 5;
+      if (/part\s*2|2nd\s*half/i.test(name)) return 6;
+      if (/highlight/i.test(name)) return 8;
+      if (/\d+:\d+/.test(name)) return 9;
+      return 7;
+    };
+    cleanSources.sort((a, b) => getReplaySourceRank(a) - getReplaySourceRank(b));
+
+    const isMultiPart = cleanSources.length > 1 || cleanSources.some(s => s.name && /(part|half|period|\d+\s*:\s*\d+|highlight|[12](?:st|nd)\s*half)/i.test(s.name));
     if (isMultiPart) {
       // Group by provider so a multi-source match (e.g. LiveTV clips + SoccerFull full match page)
       // retains all providers rather than discarding non-LiveTV providers.
@@ -828,7 +854,6 @@ async function handleStream(type, id, config) {
             const epRegex = new RegExp(`(?:part|half|period)\\s*${episodeIndex}\\b`, 'i');
             const found = pSources.find(s => s.name && epRegex.test(s.name));
             if (found) selected.push(found);
-            else if (pSources.length > 0) selected.push(pSources[0]);
           }
         }
       }

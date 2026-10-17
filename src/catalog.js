@@ -757,6 +757,23 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   if (isSeriesReplay) {
     const videos = [];
     const cleanSources = (match.sources || []).filter(s => s && s.url && !s.source?.includes('timstreams'));
+    // Prioritize dedicated full replay providers and ordered parts over goal clips
+    const getReplaySourceRank = (s) => {
+      const name = (s.name || '').toLowerCase();
+      const prov = s.source || '';
+      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays') {
+        if (/part\s*1|1st\s*half|full/i.test(name)) return 1;
+        if (/part\s*2|2nd\s*half/i.test(name)) return 2;
+        return 3;
+      }
+      if (/full\s*match|full\s*replay/i.test(name)) return 4;
+      if (/part\s*1|1st\s*half/i.test(name)) return 5;
+      if (/part\s*2|2nd\s*half/i.test(name)) return 6;
+      if (/highlight/i.test(name)) return 8;
+      if (/\d+:\d+/.test(name)) return 9;
+      return 7;
+    };
+    cleanSources.sort((a, b) => getReplaySourceRank(a) - getReplaySourceRank(b));
     if (cleanSources.length > 0) {
       cleanSources.forEach((s, idx) => {
         let rawLabel = (s.name || '').trim();
@@ -778,7 +795,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
         } else if (/^server\s*#?2\b/i.test(rawLabel)) {
           cleanLabel = 'Full Replay (Server 2)';
         } else if (!cleanLabel) {
-          cleanLabel = `Replay Part ${idx + 1}`;
+          cleanLabel = s.source === 'soccerfull' ? 'Full Match Replay' : `Replay Part ${idx + 1}`;
         }
 
         videos.push({

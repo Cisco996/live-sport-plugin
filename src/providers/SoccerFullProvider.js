@@ -577,11 +577,14 @@ class SoccerFullProvider extends BaseProvider {
 
   _formatByseStreams(sources, host, partName) {
     if (!Array.isArray(sources) || sources.length === 0) return [];
-    const best = sources.find(s => s.label === '1080p') || sources[0];
+    // Reject any source where url includes sprintcdn (token is IP/ASN bound to minting server, fails with 404 / X-Token-Status: denied on client)
+    const validSources = sources.filter(s => s && s.url && !s.url.includes('sprintcdn'));
+    if (validSources.length === 0) return [];
+    const best = validSources.find(s => s.label === '1080p') || validSources[0];
     if (!best || !best.url) return [];
 
     const cleanPart = this._formatPartLabel(partName);
-    const title = cleanPart ? `SoccerFull | ${cleanPart} (1080p) [SprintCDN]` : `SoccerFull | Full Match (1080p) [SprintCDN]`;
+    const title = cleanPart ? `SoccerFull | ${cleanPart} (1080p)` : `SoccerFull | Full Match (1080p)`;
 
     return [new StreamEntity({
       name: 'SoccerFull',

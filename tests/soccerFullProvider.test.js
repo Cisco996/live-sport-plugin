@@ -363,4 +363,103 @@ describe('SoccerFullProvider', () => {
       expect(streams[1].title).toContain('[Vidara]');
     });
   });
+
+  describe('SprintCDN Filtering & Replay Episode Preservation', () => {
+    test('_formatByseStreams rejects SprintCDN links that fail with 404/denied on clients', () => {
+      const sourcesWithSprintCdn = [
+        { label: '1080p', url: 'https://edge1-madrid-sprintcdn.r66nv9ed.com/hls2/04/12253/master.m3u8' },
+        { label: '720p', url: 'https://edge2-waw-sprintcdn.r66nv9ed.com/hls2/04/12253/master.m3u8' }
+      ];
+
+      const res = provider._formatByseStreams(sourcesWithSprintCdn, 'bysesukior.com', 'Highlights');
+      expect(res).toEqual([]);
+    });
+
+    test('_formatByseStreams keeps valid non-SprintCDN sources from Byse', () => {
+      const mixedSources = [
+        { label: '1080p', url: 'https://edge1-sprintcdn.example/master.m3u8' },
+        { label: '1080p', url: 'https://direct-cdn.example/hls/master.m3u8' }
+      ];
+
+      const res = provider._formatByseStreams(mixedSources, 'bysesukior.com', 'Full Match');
+      expect(res).toHaveLength(1);
+      expect(res[0].url).toBe('https://direct-cdn.example/hls/master.m3u8');
+      expect(res[0].title).toBe('SoccerFull | Full Match (1080p)');
+    });
+
+    test('verifyStreams drops SprintCDN streams across any provider', async () => {
+      const { verifyStreams } = require('../src/streams');
+      const mockStream = {
+        name: 'SoccerFull',
+        title: 'SoccerFull | Full Match (1080p)',
+        url: 'https://edge1-madrid-sprintcdn.r66nv9ed.com/hls2/04/12253/master.m3u8',
+        behaviorHints: { notWebReady: false }
+      };
+
+      const out = await verifyStreams([mockStream], 'test:1', {}, {});
+      expect(out).toEqual([]);
+    });
+
+    test('handleStream preserves SoccerFull replay when merged with LiveTV clips', async () => {
+      const { handleStream } = require('../src/streams');
+      const cacheService = container.resolve('cacheService');
+
+      const mergedMatch = {
+        id: 'merged_sf_ltv_test_1',
+        title: 'Frosinone vs Sassuolo',
+        category: 'football',
+        status: 'finished',
+        date: String(Date.now() - 3600 * 1000),
+        sources: [
+          { source: 'livetv', id: 'ltv_clip_1', name: '1:0', url: 'https://livetv.sx/clip1' },
+          { source: 'livetv', id: 'ltv_clip_2', name: '1:1', url: 'https://livetv.sx/clip2' },
+          { source: 'livetv', id: 'ltv_clip_3', name: 'Long Highlight', url: 'https://livetv.sx/clip3' },
+          { source: 'soccerfull', id: '/frosinone-vs-sassuolo-4531.html', name: 'Full Match', url: 'https://soccerfull.net/frosinone-vs-sassuolo-4531.html' }
+        ]
+      };
+
+      cacheService.setMatches([mergedMatch]);
+
+      jest.spyOn(container.resolve('soccerFullProvider'), 'resolveStream').mockResolvedValueOnce([
+        new StreamEntity({
+          name: 'SoccerFull',
+          title: '[VOD] Full Match (Auto HLS) [OK.ru]',
+          resolution: 'Auto',
+          url: 'https://vd517.okcdn.ru/video.m3u8',
+          behaviorHints: { notWebReady: false }
+        }),
+        new StreamEntity({
+          name: 'SoccerFull',
+          title: '[VOD] Full Match (1080p) [OK.ru]',
+          resolution: '1080p',
+          url: 'https://vd517.okcdn.ru/video.mp4',
+          behaviorHints: { notWebReady: false }
+        })
+      ]);
+
+      jest.spyOn(container.resolve('liveTvProvider'), 'resolveStream').mockResolvedValueOnce([
+        {
+          name: 'LiveTV',
+          title: 'LiveTV | 1:0',
+          url: 'https://cdn.example/10.mp4',
+          behaviorHints: { notWebReady: true }
+        }
+      ]);
+
+      const res = await handleStream('series', 'nuvio_sport_merged_sf_ltv_test_1:1:1', {});
+      expect(res.streams.length).toBeGreaterThanOrEqual(2);
+
+      const okHls = res.streams.find(s => s.url && s.url.includes('vd517.okcdn.ru/video.m3u8'));
+      const okMp4 = res.streams.find(s => s.url && s.url.includes('vd517.okcdn.ru/video.mp4'));
+
+      expect(okHls).toBeDefined();
+      expect(okMp4).toBeDefined();
+
+      const hlsIdx = res.streams.indexOf(okHls);
+      const ltvIdx = res.streams.findIndex(s => s.title && s.title.includes('LiveTV'));
+      if (ltvIdx !== -1) {
+        expect(hlsIdx).toBeLessThan(ltvIdx);
+      }
+    });
+  });
 });
