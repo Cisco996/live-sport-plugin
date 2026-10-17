@@ -483,12 +483,15 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       let res;
       let bodySample = '';
 
+      const isMp4 = targetUrl.includes('.mp4') || targetUrl.includes('type=4') || (targetUrl.includes('okcdn.ru') && !targetUrl.includes('.m3u8'));
+
       const reqHeaders = {
         'User-Agent': customUa || proxyReq['User-Agent'] || proxyReq['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
         'Referer': referer
       };
       if (origin) reqHeaders['Origin'] = origin;
       if (cookie) reqHeaders['Cookie'] = cookie;
+      if (isMp4) reqHeaders['Range'] = 'bytes=0-1024';
 
       // A verification ping is one sample of a flaky path: a CDN edge mid-
       // rotation, a reset socket, a 503 under load. Believing that single
@@ -597,7 +600,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
-      if (!isMpd && !bodySample.includes('#EXT')) {
+      if (!isMpd && !isMp4 && !bodySample.includes('#EXT')) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -611,7 +614,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       }
 
       // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time (for HLS)
-      if (!isMpd) {
+      if (!isMpd && !isMp4) {
         const parsedQuality = m3u8Parser.parseManifestText(bodySample);
         if (parsedQuality) {
           if (parsedQuality.qualityTag) s.quality = parsedQuality.qualityTag;
