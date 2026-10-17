@@ -456,8 +456,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       return null;
     }
 
-    // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    // We only pre-flight check direct live streams (m3u8 urls). Web player links, third-party CDN tokens (Vavoo Sunshine), or direct VODs are kept blindly.
+    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/sunshine/') || s._source === 'vavoo' || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -992,6 +992,9 @@ async function handleStream(type, id, config) {
   const icon = sportIcons[match.category] || '📡';
   
   const niceNames = {
+    vavoo: 'Vavoo',
+    cdnlive: 'CDNLiveTV',
+    watchfooty: 'WatchFooty',
     daddylive: 'DaddyLive',
     timstreams: 'TimStreams',
     streamsports: 'StreamSports',
@@ -1007,7 +1010,11 @@ async function handleStream(type, id, config) {
     'nflvideo': 'NFLVideo',
     'fullraces': 'FullRaces',
     'hockeyreplays': 'HockeyReplays',
-    'mlblive': 'MLBLive'
+    'mlblive': 'MLBLive',
+    admin: 'Streamed.pk',
+    echo: 'Streamed.pk',
+    golf: 'Streamed.pk',
+    delta: 'Streamed.pk'
   };
 
   // ─── Eliminate DASH (.mpd) & ClearKey DRM streams completely ──────────
@@ -1073,16 +1080,24 @@ async function handleStream(type, id, config) {
     }
 
     const isWeb = !isYouTube && (!!s.externalUrl || s.name === 'Nuvio Web Player');
-    let providerName = niceNames[s._source] || niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] || 'Streamed.pk';
+    let providerName = niceNames[s._source] ||
+      (s._source ? (s._source.charAt(0).toUpperCase() + s._source.slice(1)) : null) ||
+      niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] ||
+      'Streamed.pk';
     
-    if (s.title && s.title.toLowerCase().includes('daddylive')) providerName = 'DaddyLive';
-    else if (s.title && s.title.toLowerCase().includes('timstreams')) providerName = 'TimStreams';
-    else if (s.title && s.title.toLowerCase().includes('watchfooty')) providerName = 'WatchFooty';
-    else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
-    else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
+    if (s._source === 'vavoo' || (s.title && s.title.toLowerCase().includes('vavoo'))) providerName = 'Vavoo';
+    else if (s._source === 'cdnlive' || (s.title && s.title.toLowerCase().includes('cdnlive'))) providerName = 'CDNLiveTV';
+    else if (s._source === 'watchfooty' || (s.title && s.title.toLowerCase().includes('watchfooty'))) providerName = 'WatchFooty';
+    else if (s._source === 'daddylive' || (s.title && s.title.toLowerCase().includes('daddylive'))) providerName = 'DaddyLive';
+    else if (s._source === 'timstreams' || (s.title && s.title.toLowerCase().includes('timstreams'))) providerName = 'TimStreams';
+    else if (s._source === 'streamsports99' || (s.title && s.title.toLowerCase().includes('streamsports99'))) providerName = 'StreamSports99';
     else if (s._source === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
     else if (s._source === 'hockeyreplays' || (s.title && s.title.toLowerCase().includes('hockeyreplays'))) providerName = 'HockeyReplays';
     else if (s._source === 'mlblive' || (s.title && s.title.toLowerCase().includes('mlblive'))) providerName = 'MLBLive';
+    else if (s._source === 'damitv' || (s.title && s.title.toLowerCase().includes('damitv'))) providerName = 'DamiTV';
+    else if (s._source === 'ppvst' || (s.title && s.title.toLowerCase().includes('ppvst'))) providerName = 'PPV.st';
+    else if (s._source === 'livetv' || (s.title && s.title.toLowerCase().includes('livetv'))) providerName = 'LiveTV';
+    else if (s._source === 'replayzone' || (s.title && s.title.toLowerCase().includes('replayzone'))) providerName = 'ReplayZone';
 
     let originalTitle = s.title || '';
     let channelName = '';
@@ -1159,6 +1174,7 @@ async function handleStream(type, id, config) {
       else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
       else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
       else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
+      else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
       
       if (referer) {
         if (!s.behaviorHints.proxyHeaders) {
