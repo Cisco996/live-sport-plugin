@@ -198,9 +198,11 @@ const LOWER_DIVISION_MARKERS = [
  * from this map simply keeps the previous behaviour.
  */
 const SPORT_SECONDARY_MARKERS = {
-  // Below the NHL: AHL/ECHL are the pro minors, OHL/QMJHL/WHL/USHL/NAHL junior.
+  // Below the NHL: AHL/ECHL are the pro minors, OHL/QMJHL/WHL/USHL/NAHL junior,
+  // and foreign secondary/junior leagues (MHL, VHL, KHL, DEL, Extraliga, Liiga, SHL).
   hockey: [
-    /\bahl\b/, /\bechl\b/, /\bohl\b/, /\bqmjhl\b/, /\bwhl\b/, /\bushl\b/, /\bnahl\b/
+    /\bahl\b/, /\bechl\b/, /\bohl\b/, /\bqmjhl\b/, /\bwhl\b/, /\bushl\b/, /\bnahl\b/,
+    /\bmhl\b/, /\bvhl\b/, /\bkhl\b/, /\bextraliga\b/, /\bextraleague\b/, /\bdel\b/, /\bdel2\b/, /\bliiga\b/, /\bshl\b/, /\bebel\b/, /\bicehl\b/
   ],
   // Below MLB: affiliated minor-league ball.
   baseball: [

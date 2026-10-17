@@ -121,7 +121,9 @@ class SkTechMatchResolver {
       const linkPath = item.links || '';
 
       if (!linkPath) continue;
-      const isTestOrDemo = /^test\b|^demo\b|^placeholder\b|^sample\b/i.test(title) ||
+      const isStaleGlitch = /namibia\s*(?:vs?\.?|@|-)\s*uganda/i.test(title);
+      const isTestOrDemo = isStaleGlitch ||
+                           /^test\b|^demo\b|^placeholder\b|^sample\b/i.test(title) ||
                            /test_pic|streamtest|livetest|\/test\.m3u8/i.test(linkPath) ||
                            (title === 'Live Sports Event' && !linkPath);
       if (isTestOrDemo) continue;
@@ -209,8 +211,16 @@ class SkTechMatchResolver {
           const cat     = this.normalizeCategory(curMeta.group, clean);
           const mapKey  = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 
-          const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p)\b/i);
+          const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/i);
           const resTag   = resMatch ? resMatch[1].toUpperCase() : 'HD';
+
+          // For SKTech/FanCode, 720p and 1080p work — drop lower resolutions (540p, 480p, 360p, 240p, 144p)
+          if (resMatch && resTag !== '1080P' && resTag !== '720P') {
+            curMeta = null;
+            curOpts = {};
+            continue;
+          }
+
           const langKey  = (curMeta.lang || 'def').toLowerCase();
           const srcId    = `m3u_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}_${resTag}_${langKey}`;
 
@@ -232,22 +242,19 @@ class SkTechMatchResolver {
           };
 
           this._eventStreamCache.set(srcId, srcObj);
-          const incomingWeight = RES_WEIGHT[resTag] || 720;
 
           if (matchMap.has(mapKey)) {
             const matchObj = matchMap.get(mapKey);
-            // Quality deduplication: per feed+language, keep only the highest-bitrate stream
+            // Quality deduplication: per feed + language + resolution (preserve both 720P & 1080P)
             const existingIdx = matchObj.sources.findIndex(s =>
               s.source === 'sktech' &&
               s.type   === 'fancode_direct' &&
               (s.feedLabel === feed.label || (s.channelName && s.channelName.startsWith(feed.label))) &&
-              s.langKey === langKey
+              s.langKey === langKey &&
+              s.resolution === resTag
             );
 
-            if (existingIdx !== -1) {
-              const existingWeight = RES_WEIGHT[matchObj.sources[existingIdx].resolution] || 0;
-              if (incomingWeight > existingWeight) matchObj.sources[existingIdx] = srcObj;
-            } else {
+            if (existingIdx === -1) {
               matchObj.sources.push(srcObj);
             }
           } else {
@@ -306,9 +313,11 @@ class SkTechMatchResolver {
 
     await Promise.allSettled(feedPromises);
 
-    this._dynamicCache    = matches;
+    const cleanMatches = matches.filter(m => !/namibia\s*(?:vs?\.?|@|-)\s*uganda/i.test(m.title));
+
+    this._dynamicCache    = cleanMatches;
     this._dynamicCacheTime = now;
-    return matches;
+    return cleanMatches;
   }
 
   /**

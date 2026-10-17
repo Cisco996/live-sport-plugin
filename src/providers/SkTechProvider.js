@@ -38,6 +38,7 @@ class SkTechProvider extends BaseProvider {
     try {
       const liveMatches = await this.matchResolver.fetchLiveMatches();
       for (const m of liveMatches) {
+        if (/namibia\s*(?:vs?\.?|@|-)\s*uganda/i.test(m.title)) continue;
         const isLive = m.kickoff && m.kickoff <= Date.now() && m.kickoff >= (Date.now() - 4 * 3600 * 1000);
         const status = isLive ? 'live' : ((m.kickoff && m.kickoff > Date.now()) ? 'upcoming' : 'live');
 

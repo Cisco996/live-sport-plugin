@@ -171,7 +171,6 @@ class NflVideoProvider extends BaseProvider {
     const endpoints = [
       `${this.baseUrl}/`,
       `${this.baseUrl}/2026`,
-      `${this.baseUrl}/2025`,
       `${this.baseUrl}/cfb/`
     ];
 
@@ -218,33 +217,36 @@ class NflVideoProvider extends BaseProvider {
       // Extract watch and server links
       const linkMatches = [...content.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
       const watchLinks = linkMatches.filter(l => {
-        const text = l[2].replace(/<[^>]+>/g, '').trim();
+        const text = l[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
         const href = l[1];
-        return text.includes('Watch') ||
-               text.includes('Part') ||
-               text.includes('Server') ||
-               text === 'OK' ||
-               text === 'FM' ||
-               href.includes('nhlgamestoday') ||
-               href.includes('nbaontv') ||
-               href.includes('nflontv') ||
-               href.includes('ok.ru') ||
-               href.includes('byse');
+        return /watch|part|server|^ok$|^fm$|^dm$/i.test(text) ||
+               /ok\.ru|byse|vidara|dailymotion|dai\.ly|d\.tube|nhlgamestoday|nbaontv|nflontv|guideanimaux/i.test(href);
       });
 
+      // Extract direct iframes embedded in page
+      const directIframes = [...content.matchAll(/<iframe[^>]+src="([^"]+)"/gi)];
+      for (let idx = 0; idx < directIframes.length; idx++) {
+        watchLinks.push([null, directIframes[idx][1], `Direct Player ${idx + 1}`]);
+      }
+
       const byseStreams = [];
+      const vidaraStreams = [];
       const okStreams = [];
+      const dmStreams = [];
+      const dtubeStreams = [];
       const directStreams = [];
+      const seenUrls = new Set();
 
       for (let i = 0; i < watchLinks.length; i++) {
         let dest = watchLinks[i][1];
         const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
         const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
 
-        // Unwrap bridge iframe wrappers (nhlgamestoday.com, nbaontv.com, nflontv.com)
-        if (dest.includes('nhlgamestoday.com') || dest.includes('nbaontv.com') || dest.includes('nflontv.com')) {
+        // Unwrap bridge page if dest is not a direct video/embed provider
+        const isDirectProvider = /ok\.ru|byse|vidara|dailymotion|dai\.ly|d\.tube|\.(?:m3u8|mp4)/i.test(dest);
+        if (!isDirectProvider && /^https?:\/\//i.test(dest)) {
           try {
-            const bridgeHtml = await this.fetchPage.fire(dest);
+            const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://nfl-video.com/' });
             const iframeMatch = bridgeHtml && bridgeHtml.match(/<iframe[^>]+src="([^"]+)"/i);
             if (iframeMatch) {
               dest = iframeMatch[1];
@@ -257,37 +259,89 @@ class NflVideoProvider extends BaseProvider {
           dest = `https:${dest}`;
         }
 
-        // 1. Byse AES-256-GCM Payload Extraction (Top Priority - SprintCDN Edge)
+        // 1. Vidara API resolution
+        if (this._isVidaraUrl(dest)) {
+          const extracted = await this._extractVidara(dest, partName);
+          for (const s of extracted) {
+            if (!seenUrls.has(s.url)) {
+              seenUrls.add(s.url);
+              vidaraStreams.push(s);
+            }
+          }
+          continue;
+        }
+
+        // 2. Byse AES-256-GCM Payload Extraction (SprintCDN Edge)
         if (this._isByseUrl(dest)) {
           const extracted = await this._extractByse(dest, partName);
-          if (extracted && extracted.length > 0) {
-            byseStreams.push(...extracted);
-            continue;
+          for (const s of extracted) {
+            if (!seenUrls.has(s.url)) {
+              seenUrls.add(s.url);
+              byseStreams.push(s);
+            }
           }
+          continue;
         }
 
-        // 2. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
+        // 3. Dailymotion Direct HLS / Player metadata
+        if (this._isDailymotionUrl(dest)) {
+          const extracted = await this._extractDailymotion(dest, partName);
+          for (const s of extracted) {
+            if (!seenUrls.has(s.url)) {
+              seenUrls.add(s.url);
+              dmStreams.push(s);
+            }
+          }
+          continue;
+        }
+
+        // 4. DTube decentralized master HLS
+        if (this._isDTubeUrl(dest)) {
+          const extracted = await this._extractDTube(dest, partName);
+          for (const s of extracted) {
+            if (!seenUrls.has(s.url)) {
+              seenUrls.add(s.url);
+              dtubeStreams.push(s);
+            }
+          }
+          continue;
+        }
+
+        // 5. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
         if (dest.includes('ok.ru')) {
           const extracted = await this._extractOkRu(dest, partName);
-          if (extracted && extracted.length > 0) {
-            okStreams.push(...extracted);
-            continue;
+          for (const s of extracted) {
+            if (!seenUrls.has(s.url)) {
+              seenUrls.add(s.url);
+              okStreams.push(s);
+            }
           }
+          continue;
         }
 
-        // 3. Direct Media File
+        // 6. Direct Media File
         if (/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
-          directStreams.push(new StreamEntity({
-            name: this.name,
-            title: `${partName} (Direct)`,
-            resolution: '1080p',
-            url: dest,
-            behaviorHints: { notWebReady: false }
-          }));
+          if (!seenUrls.has(dest)) {
+            seenUrls.add(dest);
+            directStreams.push(new StreamEntity({
+              name: this.name,
+              title: `${partName} (Direct)`,
+              resolution: '1080p',
+              url: dest,
+              behaviorHints: { notWebReady: false }
+            }));
+          }
         }
       }
 
-      const streams = [...byseStreams, ...okStreams, ...directStreams];
+      const streams = [
+        ...byseStreams,
+        ...vidaraStreams,
+        ...okStreams,
+        ...dmStreams,
+        ...dtubeStreams,
+        ...directStreams
+      ];
 
       if (streams.length > 0) {
         this._setCache(this._streamCache, targetUrl, streams);
@@ -442,7 +496,9 @@ class NflVideoProvider extends BaseProvider {
 
       if (!playback) {
         const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-        const code = pathParts[pathParts.length - 1];
+        // bysekoze uses /e/<code>/<slug> — code is segment after /e/, not last segment
+        const eIdx = pathParts.indexOf('e');
+        const code = (eIdx >= 0 && pathParts[eIdx + 1]) ? pathParts[eIdx + 1] : pathParts[pathParts.length - 1];
         if (code) {
           const apiRes = await undici.request(`https://${host}/api/videos/${code}/`, {
             headers: {
@@ -493,6 +549,178 @@ class NflVideoProvider extends BaseProvider {
       }
 
       return streams;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  _isVidaraUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    return /vidara\.so/i.test(url);
+  }
+
+  _isDailymotionUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    return /(?:dailymotion\.com|dai\.ly|geo\.dailymotion\.com)/i.test(url);
+  }
+
+  _isDTubeUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    return /(?:play\.d\.tube|d\.tube)/i.test(url);
+  }
+
+  _extractDailymotionVideoId(url) {
+    if (!url || typeof url !== 'string') return null;
+    const match = url.match(/[?&]video=([a-zA-Z0-9]+)/i) ||
+                  url.match(/(?:dailymotion\.com\/(?:video|embed\/video)|dai\.ly)\/([a-zA-Z0-9]+)/i);
+    return match ? match[1] : null;
+  }
+
+  async _extractVidara(embedUrl, partName = '') {
+    try {
+      const parsed = new URL(embedUrl);
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      const eIdx = pathParts.indexOf('e');
+      const filecode = (eIdx >= 0 && pathParts[eIdx + 1]) ? pathParts[eIdx + 1] : pathParts[pathParts.length - 1];
+      if (!filecode) return [];
+
+      const postUrl = `https://${parsed.host}/api/stream`;
+      const res = await undici.request(postUrl, {
+        method: 'POST',
+        headers: {
+          ...this.defaultHeaders,
+          'Referer': `https://${parsed.host}/e/${filecode}`,
+          'Origin': `https://${parsed.host}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filecode: filecode,
+          device: 'desktop',
+          codecs: ['avc', 'mp4a']
+        }),
+        headersTimeout: 6000,
+        bodyTimeout: 6000
+      });
+
+      if (res.statusCode !== 200) return [];
+      const data = await res.body.json();
+      if (!data || !data.streaming_url) return [];
+
+      const cleanPart = partName.trim();
+      const streamTitle = cleanPart ? `${cleanPart} (1080p) [Vidara]` : `Full Game (1080p) [Vidara]`;
+
+      return [new StreamEntity({
+        name: this.name,
+        title: streamTitle,
+        resolution: '1080p',
+        url: data.streaming_url,
+        behaviorHints: {
+          notWebReady: false,
+          proxyHeaders: {
+            request: {
+              'User-Agent': this.defaultHeaders['User-Agent']
+            }
+          }
+        }
+      })];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async _extractDailymotion(url, partName = '') {
+    const videoId = this._extractDailymotionVideoId(url);
+    if (!videoId) return [];
+
+    try {
+      const metaUrl = `https://www.dailymotion.com/player/metadata/video/${videoId}`;
+      const res = await undici.request(metaUrl, {
+        headers: {
+          ...this.defaultHeaders,
+          'Referer': `https://geo.dailymotion.com/player.html?video=${videoId}`,
+          'Origin': 'https://geo.dailymotion.com'
+        },
+        headersTimeout: 6000,
+        bodyTimeout: 6000
+      });
+
+      if (res.statusCode !== 200) return [];
+      const cookies = (res.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+      const meta = await res.body.json();
+      if (!meta || meta.error) return [];
+
+      const streams = [];
+      const cleanPart = partName.trim();
+
+      if (meta.qualities && meta.qualities.auto && meta.qualities.auto[0] && meta.qualities.auto[0].url) {
+        const m3u8Url = meta.qualities.auto[0].url;
+        const streamTitle = cleanPart ? `${cleanPart} (Auto HLS) [Dailymotion]` : `Full Game (Auto HLS) [Dailymotion]`;
+
+        streams.push(new StreamEntity({
+          name: this.name,
+          title: streamTitle,
+          resolution: '1080p',
+          url: m3u8Url,
+          behaviorHints: {
+            notWebReady: false,
+            proxyHeaders: {
+              request: {
+                'User-Agent': this.defaultHeaders['User-Agent'],
+                'Referer': 'https://geo.dailymotion.com/',
+                'Origin': 'https://geo.dailymotion.com',
+                ...(cookies ? { 'Cookie': cookies } : {})
+              }
+            }
+          }
+        }));
+      }
+
+      return streams;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async _extractDTube(url, partName = '') {
+    try {
+      const parsed = new URL(url);
+      const vidId = parsed.searchParams.get('v') || parsed.pathname.split('/').filter(Boolean).pop();
+      if (!vidId) return [];
+
+      // DTube serves master m3u8 from nas1.d.tube (or fallback nas2)
+      const nasCandidates = [
+        `https://nas1.d.tube/videos/${vidId}/master.m3u8`,
+        `https://nas2.d.tube/videos/${vidId}/master.m3u8`
+      ];
+
+      for (const m3u8Url of nasCandidates) {
+        try {
+          const res = await undici.request(m3u8Url, {
+            headers: this.defaultHeaders,
+            headersTimeout: 4000,
+            bodyTimeout: 4000
+          });
+          if (res.statusCode === 200) {
+            const cleanPart = partName.trim();
+            const streamTitle = cleanPart ? `${cleanPart} (Auto HLS) [DTube]` : `Full Game (Auto HLS) [DTube]`;
+            return [new StreamEntity({
+              name: this.name,
+              title: streamTitle,
+              resolution: '1080p',
+              url: m3u8Url,
+              behaviorHints: {
+                notWebReady: false,
+                proxyHeaders: {
+                  request: {
+                    'User-Agent': this.defaultHeaders['User-Agent']
+                  }
+                }
+              }
+            })];
+          }
+        } catch (_) {}
+      }
+      return [];
     } catch (_) {
       return [];
     }

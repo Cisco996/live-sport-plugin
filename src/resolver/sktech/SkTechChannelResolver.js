@@ -286,16 +286,32 @@ class SkTechChannelResolver {
                               /relig|church|jesus|gospel|catholic|christ|bible|islam|quran|faith/i.test(t);
           const isShopping = /shopping|qvc|hsn/i.test(g) || /qvc|hsn/i.test(t);
           const isOfflineOrGeo = /\[geo-blocked\]|\[not 24\/7\]|\(offline\)|\[offline\]|\(unavailable\)|\[dead\]|\[off air\]|\[not working\]|\[testing\]/i.test(t);
-          const isPlaceholder = /download sk tech|placeholder/i.test(t);
+          const isPlaceholder = /download sk tech|placeholder|^upcoming$/i.test(t);
           const isDeadHost = /aalmaruf1702|bbc-hls-live\.akamaized\.net|vod\.hbomax\.com|hoast-plm\.shop/i.test(streamUrl)
             || /pluto\.tv/i.test(streamUrl)             // Nukes all 740 "That's a wrap" slates
             || /kstv\.us/i.test(streamUrl)              // Nukes 717 expired 401 accounts
             || /vocotv\.pro/i.test(streamUrl)           // Nukes 574 offline connection-refused servers
-            || /scalecdn\.co/i.test(streamUrl)          // Nukes 365 expired 401 accounts
+            || /leadcool\.xyz/i.test(streamUrl)         // Nukes 221 dead connection-refused Xtream servers (including NFL team channels)
+            || /scalecdn\.co/i.test(streamUrl)          // Nukes 365 expired 0-byte accounts (including MLB team channels)
             || /moveonjoy\.com/i.test(streamUrl)        // Nukes 107 connection hangup servers
             || /dfqz\.cc|supersonictv|1tv41\.icu|nonamevos/i.test(streamUrl)
             || /frequency\.stream/i.test(streamUrl)     // Nukes dead FAST frequency streams
             || /cord-cutter\.net|raccoon\.bz/i.test(streamUrl)
+            || /t\.me|telegram/i.test(streamUrl)        // Nukes fake Telegram promo cards
+            || /d35j504z0x2vu2\.cloudfront\.net/i.test(streamUrl)   // Nukes 131 dead DNS channels
+            || /hls.*\.stb\.md/i.test(streamUrl)                    // Nukes 96 expired 403 token channels
+            || /tapmadlive\.akamaized\.net/i.test(streamUrl)        // Nukes 36 expired 403 channels
+            || /3catdirectes\.cat/i.test(streamUrl)                 // Nukes 29 expired 403 Catalan channels
+            || /livetv-fa\.tubi\.video|apollo\.production-public\.tubi\.io/i.test(streamUrl) // Nukes 27 dead DNS Tubi channels
+            || /d2gvyg6lvauoko\.cloudfront\.net/i.test(streamUrl)   // Nukes 16 dead 403 CloudFront channels
+            || /content.*\.uplynk\.com/i.test(streamUrl)            // Nukes 14 dead 404 Uplynk endpoints
+            || /d1g8wgjurz8via\.cloudfront\.net/i.test(streamUrl)   // Nukes 13 dead timeout CloudFront channels
+            || /stream-us-east-1\.getpublica\.com/i.test(streamUrl) // Nukes 12 HTTP 400 endpoints
+            || /mdc\.ott\.alticeusa\.net/i.test(streamUrl)          // Nukes 12 dead Altice timeout channels
+            || /liveingesta318\.cdnmedia\.tv/i.test(streamUrl)      // Nukes 10 HTTP 403 channels
+            || /.*\.cdn\.runn\.tv|playout\.runn\.tv/i.test(streamUrl) // Nukes 17 dead Runn TV channels
+            || /fast-channels\.atresmedia\.com/i.test(streamUrl)    // Nukes 7 HTTP 492 blocked channels
+            || /streamer\.zapitv\.com|energeek\.cl/i.test(streamUrl) // Nukes 12 HTTP 403 channels
             || /token=expired/i.test(streamUrl);
 
           if (!isTestOrDemo && !isRadio && !isReligious && !isShopping && !isOfflineOrGeo && !isPlaceholder && !isDeadHost) {

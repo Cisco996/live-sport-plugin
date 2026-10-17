@@ -376,7 +376,9 @@ class ReplayZoneProvider {
             const u = new URL(embedUrl);
             const host = u.hostname;
             const pathParts = u.pathname.split('/').filter(Boolean);
-            const code = pathParts[pathParts.length - 1];
+            // bysekoze uses /e/<code>/<slug> — code is segment after /e/, not last segment
+            const eIdx = pathParts.indexOf('e');
+            const code = (eIdx >= 0 && pathParts[eIdx + 1]) ? pathParts[eIdx + 1] : pathParts[pathParts.length - 1];
             if (!code) return [];
 
             const cacheKey = `${host}:${code}`;

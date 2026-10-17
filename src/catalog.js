@@ -77,7 +77,7 @@ const REPLAY_SPORTS = [
 ];
 
 // Sources whose matches qualify for the replay retention window and replay hubs.
-const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces']);
+const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
 
 const GENRE_TO_CATEGORY = {
   'football': 'football',
@@ -345,13 +345,18 @@ function sortCatalogMatches(matches, isReplayMode = false) {
 
   decorated.sort((a, b) => {
     if (isReplayMode) {
+      const dayA = a.kickoff > 0 ? Math.floor(a.kickoff / 86400000) : 0;
+      const dayB = b.kickoff > 0 ? Math.floor(b.kickoff / 86400000) : 0;
+      if (dayA > 0 && dayB > 0 && dayA !== dayB) {
+        return dayB - dayA; // Newer day first
+      }
+      if (dayA > 0 && dayB === 0) return -1;
+      if (dayA === 0 && dayB > 0) return 1;
+      if (a.tier !== b.tier) return a.tier - b.tier; // Mainstream (NHL/NBA) before Minor/Junior within the day
+      if (a.pop !== b.pop) return b.pop - a.pop;
       if (a.kickoff > 0 && b.kickoff > 0 && a.kickoff !== b.kickoff) {
         return b.kickoff - a.kickoff;
       }
-      if (a.kickoff > 0 && b.kickoff === 0) return -1;
-      if (a.kickoff === 0 && b.kickoff > 0) return 1;
-      if (a.tier !== b.tier) return a.tier - b.tier;
-      if (a.pop !== b.pop) return b.pop - a.pop;
       return a.idx - b.idx;
     }
 

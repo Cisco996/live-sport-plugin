@@ -98,6 +98,11 @@ function _compoundify(t) {
     [/\breal\s*madrid\b|\br\s*madrid\b/g, 'realmadrid'],
     // Basketball Milano (must precede generic Milan rule)
     [/\bolimpia\s*milan[o]?\b/g, 'olimpiamilano'],
+    // Baseball (MLB)
+    [/\bred\s*sox\b/g, 'redsox'],
+    [/\bwhite\s*sox\b/g, 'whitesox'],
+    [/\bblue\s*jays\b/g, 'bluejays'],
+    [/\bd[- ]?backs\b|\bdiamondbacks\b/g, 'diamondbacks'],
     // inter variants must precede the bare-inter rule below
     [/\binter\s*miami\b/g, 'intermiami'],
     [/\binter\s*turku\b/g, 'interturku'],
@@ -336,6 +341,13 @@ function _tryExtractTeams(title) {
   if (parts.length === 2) {
     return [_tokenize(parts[0]).join(' '), _tokenize(parts[1]).join(' ')];
   }
+  const extracted = extractTeamsFromTitle(title);
+  if (extracted && extracted.length === 2) {
+    return [
+      _tokenize(_compoundify(_stripNoise(_foldText(extracted[0])))).join(' '),
+      _tokenize(_compoundify(_stripNoise(_foldText(extracted[1])))).join(' ')
+    ];
+  }
   return null;
 }
 
@@ -344,8 +356,8 @@ function _tryExtractTeams(title) {
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, providerHealthService }) {
-    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : [])];
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, providerHealthService }) {
+    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
@@ -372,25 +384,35 @@ class MatchAggregator {
     const normalized = _compoundify(_stripNoise(title));
     const motorsportSeries = _extractMotorsportSeries(title, e && e.league);
     const isMotorsport = (this._normalizeCategory(e && e.category) === 'motorsport') || motorsportSeries !== 'other';
+    const extractedTeams = isMotorsport ? null : _tryExtractTeams(title);
+    const fallbackTeams = (!extractedTeams && !isMotorsport && e && e.team1 && e.team2 && e.team1.name && e.team2.name)
+      ? [
+          _tokenize(_compoundify(_stripNoise(_foldText(e.team1.name)))).join(' '),
+          _tokenize(_compoundify(_stripNoise(_foldText(e.team2.name)))).join(' ')
+        ]
+      : null;
+
     return {
       id,
       category: e && e.category ? String(e.category) : '',
       date: _parseEventDate(e && e.date),
-      teams: isMotorsport ? null : _tryExtractTeams(title),
+      teams: extractedTeams || fallbackTeams,
       tokens: new Set(_tokenize(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
       norm: normalized.replace(/\s+/g, ' ').trim(),
       motorsportSeries,
       motorsportSession: _extractMotorsportSession(title),
       // Extract digits from the NORMALIZED form so compound tokens like
-      // "formulaone" don't leave a stray "1". Also strip 4-digit calendar
-      // years (2020–2099) since providers sometimes brand titles with the
-      // season year and it must not block merging with un-branded twins.
-      digits: (normalized.match(/\d+/g) || [])
+      // "formulaone" don't leave a stray "1". Strip 4-digit calendar years
+      // and day numbers following month names (e.g. October 15) so date
+      // metadata does not act as a channel-number collision blocker.
+      digits: (normalized
+        .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b/gi, ' ')
+        .match(/\d+/g) || [])
         .filter(d => { const n = Number(d); return !(n >= 2000 && n <= 2100); })
         .sort()
         .join(','),
       status: e && e.status ? String(e.status) : '',
-      isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_'),
+      isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'),
       isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels')) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_')
     };
   }
@@ -834,13 +856,13 @@ class MatchAggregator {
     // Re-scraping mirrors and archive pages on every server restart
     // or sync burns significant CPU, network, and RAM. Reuse cached replays if they
     // were synced within the last 12 hours.
-    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces']);
+    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
     const REPLAY_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
     const previous = (this.cacheService && typeof this.cacheService.getMatches === 'function')
       ? this.cacheService.getMatches()
       : [];
-    const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo' || s.source === 'fullraces'));
+    const previousReplays = previous.filter(m => m && m.sources && m.sources.some(s => s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo' || s.source === 'fullraces' || s.source === 'hockeyreplays' || s.source === 'mlblive'));
 
     // Sanitize cached replays: purge non-replay sources (e.g. sktech/daddylive feeds mistakenly attached in past runs)
     for (const m of previousReplays) {

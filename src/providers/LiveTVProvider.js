@@ -108,6 +108,162 @@ function normalizeCategory(raw) {
   return CANONICAL.has(c) ? c : 'other';
 }
 
+const NBA_FRANCHISES = Object.freeze({
+  'atlanta': 'Atlanta Hawks',
+  'boston': 'Boston Celtics',
+  'brooklyn': 'Brooklyn Nets',
+  'charlotte': 'Charlotte Hornets',
+  'chicago': 'Chicago Bulls',
+  'cleveland': 'Cleveland Cavaliers',
+  'dallas': 'Dallas Mavericks',
+  'denver': 'Denver Nuggets',
+  'detroit': 'Detroit Pistons',
+  'golden state': 'Golden State Warriors',
+  'houston': 'Houston Rockets',
+  'indiana': 'Indiana Pacers',
+  'clippers': 'LA Clippers',
+  'la clippers': 'LA Clippers',
+  'lakers': 'Los Angeles Lakers',
+  'la lakers': 'Los Angeles Lakers',
+  'memphis': 'Memphis Grizzlies',
+  'miami': 'Miami Heat',
+  'milwaukee': 'Milwaukee Bucks',
+  'minnesota': 'Minnesota Timberwolves',
+  'new orleans': 'New Orleans Pelicans',
+  'new york': 'New York Knicks',
+  'ny knicks': 'New York Knicks',
+  'oklahoma': 'Oklahoma City Thunder',
+  'oklahoma city': 'Oklahoma City Thunder',
+  'orlando': 'Orlando Magic',
+  'philadelphia': 'Philadelphia 76ers',
+  'phoenix': 'Phoenix Suns',
+  'portland': 'Portland Trail Blazers',
+  'sacramento': 'Sacramento Kings',
+  'san antonio': 'San Antonio Spurs',
+  'toronto': 'Toronto Raptors',
+  'utah': 'Utah Jazz',
+  'washington': 'Washington Wizards'
+});
+
+const NHL_FRANCHISES = Object.freeze({
+  'anaheim': 'Anaheim Ducks',
+  'boston': 'Boston Bruins',
+  'buffalo': 'Buffalo Sabres',
+  'calgary': 'Calgary Flames',
+  'carolina': 'Carolina Hurricanes',
+  'chicago': 'Chicago Blackhawks',
+  'colorado': 'Colorado Avalanche',
+  'columbus': 'Columbus Blue Jackets',
+  'dallas': 'Dallas Stars',
+  'detroit': 'Detroit Red Wings',
+  'edmonton': 'Edmonton Oilers',
+  'florida': 'Florida Panthers',
+  'los angeles': 'Los Angeles Kings',
+  'la kings': 'Los Angeles Kings',
+  'minnesota': 'Minnesota Wild',
+  'montreal': 'Montreal Canadiens',
+  'nashville': 'Nashville Predators',
+  'new jersey': 'New Jersey Devils',
+  'ny islanders': 'New York Islanders',
+  'islanders': 'New York Islanders',
+  'ny rangers': 'New York Rangers',
+  'rangers': 'New York Rangers',
+  'ottawa': 'Ottawa Senators',
+  'philadelphia': 'Philadelphia Flyers',
+  'pittsburgh': 'Pittsburgh Penguins',
+  'san jose': 'San Jose Sharks',
+  'seattle': 'Seattle Kraken',
+  'seattle kraken': 'Seattle Kraken',
+  'saint-louis': 'St. Louis Blues',
+  'st louis': 'St. Louis Blues',
+  'st. louis': 'St. Louis Blues',
+  'tampa bay': 'Tampa Bay Lightning',
+  'toronto': 'Toronto Maple Leafs',
+  'utah': 'Utah Hockey Club',
+  'utah mammoth': 'Utah Hockey Club',
+  'vancouver': 'Vancouver Canucks',
+  'vegas': 'Vegas Golden Knights',
+  'washington': 'Washington Capitals',
+  'winnipeg': 'Winnipeg Jets'
+});
+
+const MLB_FRANCHISES = Object.freeze({
+  'arizona': 'Arizona Diamondbacks',
+  'diamondbacks': 'Arizona Diamondbacks',
+  'd-backs': 'Arizona Diamondbacks',
+  'atlanta': 'Atlanta Braves',
+  'braves': 'Atlanta Braves',
+  'baltimore': 'Baltimore Orioles',
+  'orioles': 'Baltimore Orioles',
+  'boston': 'Boston Red Sox',
+  'red sox': 'Boston Red Sox',
+  'chicago cubs': 'Chicago Cubs',
+  'cubs': 'Chicago Cubs',
+  'chi cubs': 'Chicago Cubs',
+  'chicago white sox': 'Chicago White Sox',
+  'white sox': 'Chicago White Sox',
+  'chi white sox': 'Chicago White Sox',
+  'cincinnati': 'Cincinnati Reds',
+  'reds': 'Cincinnati Reds',
+  'cleveland': 'Cleveland Guardians',
+  'guardians': 'Cleveland Guardians',
+  'indians': 'Cleveland Guardians',
+  'colorado': 'Colorado Rockies',
+  'rockies': 'Colorado Rockies',
+  'detroit': 'Detroit Tigers',
+  'tigers': 'Detroit Tigers',
+  'houston': 'Houston Astros',
+  'astros': 'Houston Astros',
+  'kansas city': 'Kansas City Royals',
+  'royals': 'Kansas City Royals',
+  'la angels': 'Los Angeles Angels',
+  'angels': 'Los Angeles Angels',
+  'los angeles angels': 'Los Angeles Angels',
+  'anaheim': 'Los Angeles Angels',
+  'la dodgers': 'Los Angeles Dodgers',
+  'dodgers': 'Los Angeles Dodgers',
+  'los angeles dodgers': 'Los Angeles Dodgers',
+  'miami': 'Miami Marlins',
+  'marlins': 'Miami Marlins',
+  'milwaukee': 'Milwaukee Brewers',
+  'brewers': 'Milwaukee Brewers',
+  'minnesota': 'Minnesota Twins',
+  'twins': 'Minnesota Twins',
+  'ny mets': 'New York Mets',
+  'mets': 'New York Mets',
+  'new york mets': 'New York Mets',
+  'ny yankees': 'New York Yankees',
+  'yankees': 'New York Yankees',
+  'new york yankees': 'New York Yankees',
+  'oakland': 'Oakland Athletics',
+  'athletics': 'Oakland Athletics',
+  'philadelphia': 'Philadelphia Phillies',
+  'phillies': 'Philadelphia Phillies',
+  'pittsburgh': 'Pittsburgh Pirates',
+  'pirates': 'Pittsburgh Pirates',
+  'san diego': 'San Diego Padres',
+  'padres': 'San Diego Padres',
+  'san francisco': 'San Francisco Giants',
+  'giants': 'San Francisco Giants',
+  'sf giants': 'San Francisco Giants',
+  'seattle': 'Seattle Mariners',
+  'mariners': 'Seattle Mariners',
+  'saint-louis': 'St. Louis Cardinals',
+  'st louis': 'St. Louis Cardinals',
+  'st. louis': 'St. Louis Cardinals',
+  'cardinals': 'St. Louis Cardinals',
+  'tampa bay': 'Tampa Bay Rays',
+  'rays': 'Tampa Bay Rays',
+  'devil rays': 'Tampa Bay Rays',
+  'texas': 'Texas Rangers',
+  'rangers': 'Texas Rangers',
+  'toronto': 'Toronto Blue Jays',
+  'blue jays': 'Toronto Blue Jays',
+  'washington': 'Washington Nationals',
+  'nationals': 'Washington Nationals',
+  'nats': 'Washington Nationals'
+});
+
 function ymdDash(ymd) {
   return ymd.slice(0, 4) + '-' + ymd.slice(4, 6) + '-' + ymd.slice(6, 8);
 }
@@ -153,22 +309,55 @@ function parseArchive(html, ymd) {
     }
     if (!sources.length) continue;
 
-    const home = decode(teams[1]);
-    const away = decode(teams[2]);
-    const title = `${home} - ${away}`;
-    const idSafe = title.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + ymd;
+    const rawHome = decode(teams[1]).trim();
+    const rawAway = decode(teams[2]).trim();
+    const cat = normalizeCategory(league);
+    const isNba = cat === 'basketball' && (/\bnba\b/i.test(league) || NBA_FRANCHISES[rawHome.toLowerCase()] || NBA_FRANCHISES[rawAway.toLowerCase()]);
+    const isNhl = cat === 'hockey' && (/\bnhl\b/i.test(league) || NHL_FRANCHISES[rawHome.toLowerCase()] || NHL_FRANCHISES[rawAway.toLowerCase()]);
+    const isMlb = cat === 'baseball' && (/\bmlb\b/i.test(league) || MLB_FRANCHISES[rawHome.toLowerCase()] || MLB_FRANCHISES[rawAway.toLowerCase()]);
+
+    let home = rawHome;
+    let away = rawAway;
+    let effectiveLeague = league;
+
+    if (isNba) {
+      home = NBA_FRANCHISES[rawHome.toLowerCase()] || rawHome;
+      away = NBA_FRANCHISES[rawAway.toLowerCase()] || rawAway;
+      if (!effectiveLeague || !/\bnba\b/i.test(effectiveLeague)) effectiveLeague = 'NBA';
+    } else if (isNhl) {
+      home = NHL_FRANCHISES[rawHome.toLowerCase()] || rawHome;
+      away = NHL_FRANCHISES[rawAway.toLowerCase()] || rawAway;
+      if (!effectiveLeague || !/\bnhl\b/i.test(effectiveLeague)) effectiveLeague = 'NHL';
+    } else if (isMlb) {
+      home = MLB_FRANCHISES[rawHome.toLowerCase()] || rawHome;
+      away = MLB_FRANCHISES[rawAway.toLowerCase()] || rawAway;
+      if (!effectiveLeague || !/\bmlb\b/i.test(effectiveLeague)) effectiveLeague = 'MLB';
+    }
+
+    const title = effectiveLeague
+      ? `${home} vs ${away} - ${effectiveLeague}`
+      : `${home} vs ${away}`;
+    const idSafe = `${rawHome}-${rawAway}`.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + ymd;
+
+    const timeStr = time ? time[1].trim() : '';
+    let matchDate = ymdDash(ymd);
+    if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+      const paddedTime = timeStr.length === 4 ? `0${timeStr}` : timeStr;
+      matchDate = `${ymdDash(ymd)}T${paddedTime}:00.000Z`;
+    }
+
     out.push({
       id: `livetv_${idSafe}`,
       title,
-      category: normalizeCategory(league),
-      league,
-      date: ymdDash(ymd),
+      category: cat,
+      league: effectiveLeague,
+      date: matchDate,
       status: 'finished',
       score: score ? score[1] : '',
-      time: time ? time[1] : '',
+      time: timeStr,
       thumbnail_url: '',
-      team1: home.trim() ? { name: home.trim() } : null,
-      team2: away.trim() ? { name: away.trim() } : null,
+      team1: home ? { name: home } : null,
+      team2: away ? { name: away } : null,
       sources,
     });
   }
@@ -471,13 +660,26 @@ class LiveTVProvider {
                   _livetvReplay: true
               });
           } else if (mp4Url) {
+              // Dynamic Referer: use actual embed origin (aplXX rotates per match),
+              // fallback to livetv.sx. Hardcoded apl613 caused 403 on other hosts
+              // (e.g. actual apl622 observed 2026-10-16).
+              let referer = 'https://livetv.sx/';
+              try {
+                const embedOrigin = new URL(currentUrl).origin;
+                if (/emb\.apl\d+\.online/i.test(embedOrigin) || /livetv/i.test(embedOrigin)) {
+                  referer = embedOrigin + '/';
+                } else if (/^https?:\/\//i.test(embedOrigin)) {
+                  referer = embedOrigin + '/';
+                }
+              } catch (_) {}
+              const origin = referer.replace(/\/$/, '');
               streams.push({
                   name: 'LiveTV',
                   title: `LiveTV | ${clip.label}`,
                   url: mp4Url,
-                  behaviorHints: { 
-                      notWebReady: true, 
-                      proxyHeaders: { request: { 'User-Agent': UA, 'Referer': 'https://emb.apl613.online/' } } 
+                  behaviorHints: {
+                      notWebReady: true,
+                      proxyHeaders: { request: { 'User-Agent': UA, 'Referer': referer, 'Origin': origin } }
                   },
                   _livetvReplay: true
               });
@@ -568,4 +770,5 @@ class LiveTVProvider {
   }
 }
 
+LiveTVProvider.parseArchive = parseArchive;
 module.exports = LiveTVProvider;

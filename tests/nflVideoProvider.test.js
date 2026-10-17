@@ -278,6 +278,89 @@ describe('NflVideoProvider', () => {
       expect(streams[1].url).toBe('https://vd265.okcdn.ru/video.mp4');
       expect(streams[1].title).toContain('[OK.ru]');
     });
+
+    test('resolves Vidara, Dailymotion, and DTube streams with correct headers and zero server bandwidth', async () => {
+      provider._extractVidara = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Part 1 (1080p) [Vidara]',
+          resolution: '1080p',
+          url: 'https://cdn.vidara.example/master.m3u8'
+        })
+      ]);
+
+      provider._extractDailymotion = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Part 2 (Auto HLS) [Dailymotion]',
+          resolution: '1080p',
+          url: 'https://cdndirector.dailymotion.com/cdn/manifest/video/xb7tspy.m3u8'
+        })
+      ]);
+
+      provider._extractDTube = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Part 3 (Auto HLS) [DTube]',
+          resolution: '1080p',
+          url: 'https://nas1.d.tube/videos/123/master.m3u8'
+        })
+      ]);
+
+      const multiPageHtml = `
+        <div class="content">
+          <a href="https://vidara.so/e/abc">Server 3 FM</a>
+          <a href="https://dailymotion.com/video/xb7tspy">Server 2 DM</a>
+          <a href="https://play.d.tube/?v=123">Part 3</a>
+        </div>
+      `;
+
+      provider.fetchPage = {
+        fire: jest.fn().mockResolvedValue(multiPageHtml)
+      };
+
+      const streams = await provider.resolveStream('https://nfl-video.com/multi-source-game');
+      expect(streams).toHaveLength(3);
+      expect(streams[0].title).toContain('[Vidara]');
+      expect(streams[1].title).toContain('[Dailymotion]');
+      expect(streams[2].title).toContain('[DTube]');
+    });
+
+    test('dynamically unwraps unknown cloaked bridge domains (e.g. guideanimaux.com)', async () => {
+      const matchHtml = `
+        <div class="content">
+          <a href="https://guideanimaux.com/cloaked-article">Watch</a>
+        </div>
+      `;
+
+      const bridgeHtml = `
+        <html>
+          <body>
+            <iframe src="//ok.ru/videoembed/12345678"></iframe>
+          </body>
+        </html>
+      `;
+
+      provider.fetchPage = {
+        fire: jest.fn()
+          .mockResolvedValueOnce(matchHtml)
+          .mockResolvedValueOnce(bridgeHtml)
+      };
+
+      provider._extractOkRu = jest.fn().mockResolvedValue([
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: 'Watch (1080p) [OK.ru]',
+          resolution: '1080p',
+          url: 'https://vd123.okcdn.ru/video.mp4'
+        })
+      ]);
+
+      const streams = await provider.resolveStream('https://nfl-video.com/cloaked-match');
+      expect(streams).toHaveLength(1);
+      expect(streams[0].title).toContain('[OK.ru]');
+      expect(provider._extractOkRu).toHaveBeenCalledWith('https://ok.ru/videoembed/12345678', 'Watch');
+    });
   });
 
   describe('Container & System Integration', () => {

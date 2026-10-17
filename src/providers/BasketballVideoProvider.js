@@ -166,6 +166,7 @@ class BasketballVideoProvider extends BaseProvider {
    */
   async getMatches() {
     const endpoints = [
+      `${this.baseUrl}/`,
       `${this.baseUrl}/2024-25`,
       `${this.baseUrl}/2025-26`,
       `${this.baseUrl}/wnba-video-fulll`,
@@ -451,7 +452,9 @@ class BasketballVideoProvider extends BaseProvider {
 
       if (!playback) {
         const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-        const code = pathParts[pathParts.length - 1];
+        // bysekoze uses /e/<code>/<slug> — code is segment after /e/, not last segment
+        const eIdx = pathParts.indexOf('e');
+        const code = (eIdx >= 0 && pathParts[eIdx + 1]) ? pathParts[eIdx + 1] : pathParts[pathParts.length - 1];
         if (code) {
           const apiRes = await undici.request(`https://${host}/api/videos/${code}/`, {
             headers: {

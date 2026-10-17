@@ -25,11 +25,11 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 1, 'sktech': 2, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'basketballvideo': 2, 'nflvideo': 2, 'fullraces': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 1, 'sktech': 2, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'basketballvideo': 2, 'nflvideo': 2, 'fullraces': 2, 'hockeyreplays': 2, 'mlblive': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
-    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'sktech', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
+    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
     const pa = getPriority(a.source);
     const pb = getPriority(b.source);
     if (pa !== pb) return pa - pb;
@@ -40,7 +40,7 @@ function selectSources(matchSources, config) {
     const enabled = config.sources.split(',');
     // embedindia / embedst / streamedpk are the same embed chain — all three are
     // controlled by the single 'streamedpk' toggle on the configure page.
-    const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'sktech'];
+    const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -52,7 +52,7 @@ function selectSources(matchSources, config) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'sktech'];
+  const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -111,6 +111,12 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'fullraces') {
     const provider = container.resolve('fullRacesProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'hockeyreplays') {
+    const provider = container.resolve('hockeyReplaysProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'mlblive') {
+    const provider = container.resolve('mlbLiveProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'sktech') {
     const provider = container.resolve('skTechProvider');
@@ -727,26 +733,35 @@ function deduplicateResolutions(streams) {
   const dedupedStreams = [];
 
   for (const s of streams) {
-    const rawTitle = (s.title || s.name || '').toLowerCase();
+    // Quality deduplication applies ONLY AND ONLY to SKTech streams (e.g. FanCode multi-bitrate feeds).
+    // NEVER apply to DaddyLive or any other provider!
+    const isDaddyLive = s._source === 'daddylive' || /\bdaddylive\b|\bdlhd\b/i.test(`${s.name || ''} ${s.title || ''}`);
+    const isSktech = !isDaddyLive && (s._source === 'sktech' || /\bsk\s*tech\b|\bsktech\b/i.test(`${s.name || ''} ${s.title || ''}`));
+
+    if (!isSktech) {
+      dedupedStreams.push(s);
+      continue;
+    }
+
+    const rawTitle = (s.title || s.name || s.resolution || '').toLowerCase();
     const resM = rawTitle.match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/);
     if (!resM) {
       dedupedStreams.push(s);
       continue;
     }
     const resTag  = resM[1];
-    const baseKey = `${s.name || ''}:${rawTitle.replace(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/g, '').replace(/[\s\(\)\[\]]+/g, ' ').trim()}`;
-    const rank    = RES_RANK[resTag] || 0;
+
+    // For SKTech, 720p and 1080p work — drop lower resolutions (540p, 480p, 360p, 240p, 144p)
+    if (resTag !== '1080p' && resTag !== '720p') {
+      continue;
+    }
+
+    // Keep both 1080p and 720p per stream feed, preventing duplicate identical resolutions
+    const baseKey = `${s.name || ''}:${resTag}:${rawTitle.replace(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/g, '').replace(/[\s\(\)\[\]]+/g, ' ').trim()}`;
 
     if (!streamGroupMap.has(baseKey)) {
-      streamGroupMap.set(baseKey, { stream: s, rank, index: dedupedStreams.length });
+      streamGroupMap.set(baseKey, s);
       dedupedStreams.push(s);
-    } else {
-      const existing = streamGroupMap.get(baseKey);
-      if (rank > existing.rank) {
-        dedupedStreams[existing.index] = s;
-        existing.stream = s;
-        existing.rank   = rank;
-      }
     }
   }
 
@@ -825,7 +840,7 @@ async function handleStream(type, id, config) {
   try {
     const { isReplayMatch } = require('./catalog');
     if (isReplayMatch(match)) {
-      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces']);
+      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
       const replaySources = candidateSources.filter(s => s && REPLAY_SOURCES.has(s.source));
       if (replaySources.length > 0) {
         candidateSources = replaySources;
@@ -957,16 +972,35 @@ async function handleStream(type, id, config) {
     'sktech': 'SKTech',
     'basketballvideo': 'BasketballVideo',
     'nflvideo': 'NFLVideo',
-    'fullraces': 'FullRaces'
+    'fullraces': 'FullRaces',
+    'hockeyreplays': 'HockeyReplays',
+    'mlblive': 'MLBLive'
   };
 
-  // ─── Eliminate all DASH (.mpd) & ClearKey DRM streams completely ──────
-  // ExoPlayer on stock Android apps lacks MediaDrm callbacks, causing black screen + timer.
+  // ─── Eliminate DASH (.mpd) & ClearKey DRM streams completely ──────────
+  // ExoPlayer on stock Android apps lacks MediaDrm callbacks, causing black
+  // screen + timer. The addon's own /api/manifest proxy wraps BOTH HLS (.m3u8)
+  // and DASH (.mpd) upstreams, so the proxy URL string is NOT evidence of DASH
+  // — only the wrapped target is. Keying on "/api/manifest" eliminated every
+  // proxied live HLS stream (DaddyLive et al. always proxy), which surfaced as
+  // "no sources except sktech". sktech's DASH feeds are never wanted, so they
+  // are additionally matched on a DASH path/DRM signal.
   const nonDash = streams.filter(s => {
-    const u = (s.url || s.streamUrl || s._rawMpdUrl || '').toLowerCase();
-    const isMpd = u.includes('.mpd') || u.includes('/api/manifest');
-    const isDash = isMpd || s.clearkey || s.format === 'dash' || (s.type && s.type.includes('dash'));
-    return !isDash;
+    const rawUrl = String(s.url || s.streamUrl || s._rawMpdUrl || '');
+    const lower = rawUrl.toLowerCase();
+    let target = lower;
+    if (lower.includes('/api/manifest')) {
+      try {
+        const info = parseManifestProxyUrl(rawUrl);
+        if (info && info.targetUrl) target = String(info.targetUrl).toLowerCase();
+      } catch (_) {}
+    }
+    const typeIsDash = !!(s.type && String(s.type).toLowerCase().includes('dash'));
+    const genericDash = target.includes('.mpd') || !!s.clearkey || s.format === 'dash' || typeIsDash;
+    // sktech: never serve DASH, even if it is not tagged ClearKey.
+    const isSktechDash = String(s._source || '') === 'sktech' &&
+      (/\.mpd(\?|#|$)/.test(target) || /\/dash\//.test(target) || !!s.clearkey || s.format === 'dash' || typeIsDash);
+    return !(genericDash || isSktechDash);
   });
   if (nonDash.length < streams.length) {
     const droppedCount = streams.length - nonDash.length;
