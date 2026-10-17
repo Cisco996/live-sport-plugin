@@ -350,6 +350,20 @@ function sortCatalogMatches(matches, isReplayMode = false) {
       if (dayA > 0 && dayB > 0 && dayA !== dayB) {
         return dayB - dayA; // Newer day first
       }
+      // Replays without explicit kickoff (SoccerFull recent replays) are fresh finished fixtures;
+      // rank them right alongside current-week replays rather than exiling them behind months of archives.
+      const aIsFreshReplay = a.kickoff === 0 && a.m && (a.m.status === 'finished' || a.m.status === 'ended');
+      const bIsFreshReplay = b.kickoff === 0 && b.m && (b.m.status === 'finished' || b.m.status === 'ended');
+      if (aIsFreshReplay && !bIsFreshReplay) {
+        const currentDay = Math.floor(Date.now() / 86400000);
+        if (dayB > 0 && dayB < currentDay - 2) return -1;
+        return 1;
+      }
+      if (!aIsFreshReplay && bIsFreshReplay) {
+        const currentDay = Math.floor(Date.now() / 86400000);
+        if (dayA > 0 && dayA < currentDay - 2) return 1;
+        return -1;
+      }
       if (dayA > 0 && dayB === 0) return -1;
       if (dayA === 0 && dayB > 0) return 1;
       if (a.tier !== b.tier) return a.tier - b.tier; // Mainstream (NHL/NBA) before Minor/Junior within the day
@@ -1265,6 +1279,7 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     const twoWeeksAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
     const recent = matches.filter(m => {
       const ko = m.date ? getKickoff(m.date) : 0;
+      if (ko === 0 && (m.status === 'finished' || m.status === 'ended')) return true;
       return ko >= twoWeeksAgo;
     });
     matches = recent.length >= 10 ? recent : matches.slice(0, 40);
