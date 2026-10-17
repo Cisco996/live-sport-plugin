@@ -1186,10 +1186,17 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     if (m.sources.some(s => s.source === 'timstreams')) return false;
     if (!m.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
 
-    if (targetSport === 'other') {
-      return !sports.includes(m.category);
+    // Self-healing: if category is mistakenly football but title/league indicates basketball
+    let cat = m.category;
+    if (cat === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${m.title || ''} ${m.league || ''}`)) {
+      cat = 'basketball';
+      m.category = 'basketball';
     }
-    return m.category === targetSport;
+
+    if (targetSport === 'other') {
+      return !sports.includes(cat);
+    }
+    return cat === targetSport;
   });
 
   // Personalization: `replayFilter: 'mainstream'` narrows the listing to

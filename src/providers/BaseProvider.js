@@ -56,7 +56,7 @@ class BaseProvider {
     if (cat.includes('mixedmartialart') || cat.includes('martialart') || cat.includes('mmaglobal')) return 'mma';
     if (cat.includes('fight') || cat.includes('mma') || cat.includes('boxing') || cat.includes('wrestling') || cat.includes('knuckle') || cat.includes('ufc')) return 'mma';
     if (cat.includes('formula1') || cat.includes('motogp') || cat.includes('moto') || cat.includes('motor') || cat.includes('racing') || cat.includes('cycling') || cat.includes('f1')) return 'motorsport';
-    if (cat.includes('basketball') || cat.includes('nba')) return 'basketball';
+    if (cat.includes('basketball') || cat.includes('nba') || cat.includes('wnba') || cat.includes('euroleague') || cat.includes('eurocup') || cat.includes('fiba')) return 'basketball';
     if (cat.includes('pga') || cat.includes('golf')) return 'golf';
     if (cat.includes('rugby')) return 'rugby';
     if (cat.includes('cricket')) return 'cricket';

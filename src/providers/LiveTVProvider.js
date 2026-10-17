@@ -81,7 +81,7 @@ function normalizeCategory(raw) {
   const c = String(raw || '').toLowerCase();
   if (c.includes('nhl') || c.includes('hockey')) return 'hockey';
   if (c.includes('mlb') || c.includes('baseball')) return 'baseball';
-  if (c.includes('wnba') || c.includes('nba') || c.includes('basketball') || c.includes('lnbp') || c.includes('3x3')) return 'basketball';
+  if (c.includes('wnba') || c.includes('nba') || c.includes('basketball') || c.includes('lnbp') || c.includes('3x3') || c.includes('euroleague') || c.includes('eurocup') || c.includes('fiba') || c.includes('eurobasket') || c.includes('adriatic league') || c.includes('b1.league') || c.includes('b.league') || c.includes('vtb')) return 'basketball';
   if (c.includes('nfl') || c.includes('american football')) return 'american_football';
   if (c.includes('tennis') || c.includes('wta') || c.includes('atp')) return 'tennis';
   if (c.includes('rugby')) return 'rugby';
@@ -90,12 +90,13 @@ function normalizeCategory(raw) {
   if (c.includes('golf') || c.includes('pga')) return 'golf';
   if (c.includes('formula') || c.includes('motogp') || c.includes('racing') || c.includes('nascar')) return 'motorsport';
   if (c.includes('volleyball') || c.includes('gymnastics') || c.includes('athletics')) return 'other';
+  if (c.includes('handball') || /\b(?:ehf|ihf)\b/i.test(c)) return 'other';
 
   // Ice-hockey families that did not match the explicit checks above. Word
   // boundaries keep short codes (DEL, SHL, NBL) from matching inside longer
   // football league names such as Estonia Meistriliiga.
   if (/\b(?:khl|vhl|mhl|whl|ohl|qmjhl|ahl|nhl|del|shl|ebel)\b/i.test(c) || c.includes('ice hockey') || c.includes('hockey') || /\bliiga\b/i.test(c) || c.includes('extraleague')) return 'hockey';
-  if (/\b(?:wnbl|nbl|enbl|lnb|lkl|tbl|acb|kbl)\b/i.test(c) || c.includes('ldb')) return 'basketball';
+  if (/\b(?:wnbl|nbl|enbl|lnb|lkl|tbl|acb|kbl|kbsl|bsl|pba)\b/i.test(c) || c.includes('ldb')) return 'basketball';
   // Football/soccer is the dominant archive sport; match on competition naming
   // patterns before falling back, so leagues don't land in "Other Sports".
   const FOOTBALL_HINTS = [

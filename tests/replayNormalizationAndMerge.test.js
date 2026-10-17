@@ -108,4 +108,47 @@ describe('Replay Normalization & Unified Merging Architecture', () => {
     const bv = new BasketballVideoProvider();
     expect(bv.baseUrl).toBe('https://basketball-video.com');
   });
+
+  test('LiveTVProvider normalizes Euroleague and Eurocup matches as basketball, never football', () => {
+    const mockHtml = `
+      <a class="main" href="/enx/videotourney/10/"><b>Euroleague</b></a>
+      <table height=27>
+        <tr>
+          <td><b>Barcelona&ndash;Olympiacos</b></td>
+          <td><font color="#949494"><b>86:78</b></font></td>
+          <td><span class="date">20:30</span></td>
+          <td><a class="small" href="/enx/showvideo/1598719_barcelona_olympiacos">Highlights</a></td>
+        </tr>
+      </table>
+      <table height=27>
+        <tr>
+          <td><b>Besiktas&ndash;Bayern Munich</b></td>
+          <td><font color="#949494"><b>77:82</b></font></td>
+          <td><span class="date">21:00</span></td>
+          <td><a class="small" href="/enx/showvideo/1598722_besiktas_bayern_munich">Highlights</a></td>
+        </tr>
+      </table>
+      <a class="main" href="/enx/videotourney/11/"><b>Eurocup</b></a>
+      <table height=27>
+        <tr>
+          <td><b>London Lions&ndash;Skyliners</b></td>
+          <td><font color="#949494"><b>91:80</b></font></td>
+          <td><span class="date">19:30</span></td>
+          <td><a class="small" href="/enx/showvideo/1598730_london_skyliners">Highlights</a></td>
+        </tr>
+      </table>
+    `;
+
+    const items = LiveTVProvider.parseArchive(mockHtml, '20261016');
+    expect(items.length).toBe(3);
+
+    expect(items[0].title).toBe('Barcelona vs Olympiacos - Euroleague');
+    expect(items[0].category).toBe('basketball');
+
+    expect(items[1].title).toBe('Besiktas vs Bayern Munich - Euroleague');
+    expect(items[1].category).toBe('basketball');
+
+    expect(items[2].title).toBe('London Lions vs Skyliners - Eurocup');
+    expect(items[2].category).toBe('basketball');
+  });
 });

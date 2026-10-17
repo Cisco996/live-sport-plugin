@@ -392,9 +392,15 @@ class MatchAggregator {
         ]
       : null;
 
+    let rawCategory = e && e.category ? String(e.category) : '';
+    if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
+      rawCategory = 'basketball';
+      if (e) e.category = 'basketball';
+    }
+
     return {
       id,
-      category: e && e.category ? String(e.category) : '',
+      category: rawCategory,
       date: _parseEventDate(e && e.date),
       teams: extractedTeams || fallbackTeams,
       tokens: new Set(_tokenize(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
@@ -428,7 +434,7 @@ class MatchAggregator {
   _normalizeCategory(c) {
     if (!c) return c;
     const lc = c.toLowerCase();
-    if (['nbl', 'nba', 'wnba', 'euroleague', 'ncaa_basketball'].includes(lc)) return 'basketball';
+    if (['nbl', 'nba', 'wnba', 'euroleague', 'eurocup', 'fiba', 'ncaa_basketball'].includes(lc)) return 'basketball';
     if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
     if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
     if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel'].includes(lc)) return 'football';
