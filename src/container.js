@@ -33,6 +33,7 @@ const HockeyReplaysProvider = require('./providers/HockeyReplaysProvider');
 const MlbLiveProvider = require('./providers/MlbLiveProvider');
 const VavooProvider = require('./providers/VavooProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
+const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -50,6 +51,7 @@ container.register({
   streamResolveCache: asValue(new StreamResolveCache()),
   providerHealthService: asClass(ProviderHealthService).singleton(),
   teamLogoService: asClass(TeamLogoService).singleton(),
+  broadcasterMatchService: asValue(new BroadcasterMatchService()),
   // Self-healing iframe-domain knowledge base (DaddyLive family). Singleton so
   // runtime discoveries accumulate for the process lifetime.
   iframeDomainRegistry: asValue(new IframeDomainRegistry())

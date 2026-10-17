@@ -25,7 +25,7 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 1, 'sktech': 2, 'vavoo': 2, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'basketballvideo': 2, 'nflvideo': 2, 'fullraces': 2, 'hockeyreplays': 2, 'mlblive': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'vavoo': 1, 'daddylive': 2, 'sktech': 2, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'basketballvideo': 2, 'nflvideo': 2, 'fullraces': 2, 'hockeyreplays': 2, 'mlblive': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.

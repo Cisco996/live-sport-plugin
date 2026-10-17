@@ -356,12 +356,14 @@ function _tryExtractTeams(title) {
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, providerHealthService } = {}) {
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, providerHealthService, broadcasterMatchService } = {}) {
     this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
     this.providerHealthService = providerHealthService;
+    this.vavooProvider = vavooProvider;
+    this.broadcasterMatchService = broadcasterMatchService;
     if (this.providerHealthService) this.providerHealthService.registerProviders(this.providers);
   }
 
@@ -371,6 +373,59 @@ class MatchAggregator {
 
   _extractMotorsportSession(title) {
     return _extractMotorsportSession(title);
+  }
+
+  /**
+   * Enriches live fixtures with top-quality 1080p Vavoo broadcast sources
+   * by cross-referencing broadcaster channel names (from DaddyLive etc.)
+   * with Vavoo's indexed live channels.
+   *
+   * @param {Array<Object>} matches
+   */
+  _enrichMatchesWithBroadcasters(matches) {
+    if (!this.broadcasterMatchService || !Array.isArray(matches)) return;
+    if (this.vavooProvider && typeof this.vavooProvider.isEnabled === 'function' && !this.vavooProvider.isEnabled()) {
+      return;
+    }
+
+    let enrichedCount = 0;
+    for (const match of matches) {
+      if (!match || !Array.isArray(match.sources) || match.sources.length === 0) continue;
+      // Do not inject into 24/7 channels or VOD replays
+      if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
+      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
+
+      const existingVavooUrls = new Set(
+        match.sources
+          .filter(s => s && s.source === 'vavoo')
+          .map(s => s.id)
+      );
+
+      const sourcesToScan = [...match.sources];
+      let injectedForThisMatch = 0;
+
+      for (const src of sourcesToScan) {
+        if (!src) continue;
+        const candidateName = src.channelName || src.channel_name || src.channel;
+        if (!candidateName || typeof candidateName !== 'string') continue;
+
+        const vavooSource = this.broadcasterMatchService.createVavooSource(candidateName);
+        if (vavooSource && vavooSource.id && !existingVavooUrls.has(vavooSource.id)) {
+          existingVavooUrls.add(vavooSource.id);
+          match.sources.push(vavooSource);
+          injectedForThisMatch++;
+          if (injectedForThisMatch >= 4) break; // Limit to top 4 broadcast feeds per match
+        }
+      }
+
+      if (injectedForThisMatch > 0) {
+        enrichedCount++;
+      }
+    }
+
+    if (enrichedCount > 0) {
+      console.log(`[MatchAggregator] Injected Vavoo 1080p broadcast feeds into ${enrichedCount} live fixture(s).`);
+    }
   }
 
   /**
@@ -1139,6 +1194,9 @@ class MatchAggregator {
       if (backfilled > 0) {
         console.log(`[MatchAggregator] Derived competitors for ${backfilled} title-only fixture(s).`);
       }
+
+      // Enrich active fixtures with high-definition 1080p Vavoo broadcast feeds
+      this._enrichMatchesWithBroadcasters(activeMatches);
 
       this.cacheService.setMatches(activeMatches);
       if (this.providerHealthService) {

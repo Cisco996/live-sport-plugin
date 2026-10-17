@@ -141,7 +141,7 @@ class VavooTokenManager {
     return { sig: j.addonSig, validUntil: this._parseValidUntil(j.addonSig), source: 'lokke.app' };
   }
 
-  async _fetchDualSig(fetchFn) {
+  async _fetchDualSig(fetchFn = fetch) {
     // 1. Try Primary: vypn.net
     try {
       return await this._pingVypn(fetchFn);
@@ -158,7 +158,7 @@ class VavooTokenManager {
     }
   }
 
-  async getOrRefreshSig(fetchFn) {
+  async getOrRefreshSig(fetchFn = fetch) {
     // Fast path: cached token is valid and not yet in refresh window
     if (this.isValid() && !this.needsRefresh()) {
       return this.sig;
@@ -342,14 +342,17 @@ class VavooProvider extends BaseProvider {
 
       const is4K = src.is4k || /4k|uhd/i.test(matchTitle);
       const resolution = is4K ? '4K UHD' : '1080p';
+      const channelLabel = src.channelName || (matchTitle && !matchTitle.startsWith('vavoo_') ? matchTitle : 'Live TV');
 
       return [new StreamEntity({
         name: 'Vavoo',
-        title: `${matchTitle} · ${src.group || 'Live TV'} [${resolution}]`,
+        title: `Vavoo (${channelLabel}) [${resolution}]`,
         url: streamUrl,
         resolution: is4K ? '4K' : '1080p',
         score: is4K ? 95 : 85,
         language: src.language || undefined,
+        channelName: channelLabel,
+        group: src.group,
         behaviorHints: {
           notWebReady: true,
           proxyHeaders: {
