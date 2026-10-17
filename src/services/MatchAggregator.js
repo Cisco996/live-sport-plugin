@@ -800,7 +800,12 @@ class MatchAggregator {
         }
         if (match.sources && Array.isArray(match.sources)) {
           match.sources.forEach(src => {
-            if (!existing.sources.find(s => s.id === src.id && s.source === src.source)) {
+            if (!existing.sources.find(s =>
+              s.id === src.id &&
+              s.source === src.source &&
+              (s.streamSource || '') === (src.streamSource || '') &&
+              (s.streamId || '') === (src.streamId || '')
+            )) {
               existing.sources.push(src);
             }
           });

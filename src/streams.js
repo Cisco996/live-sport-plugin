@@ -696,7 +696,8 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts 
     for (let i = 0; i < targets.length; i += BATCH_SIZE) {
       const batch = targets.slice(i, i + BATCH_SIZE);
       await Promise.allSettled(batch.map(async (src) => {
-        const key = `${src.source}:${match.id}:${src.id}`;
+        const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
+        const key = `${src.source}:${match.id}:${src.id}${subKey}`;
         if (resolveCache.get(key)) return null;
         return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
       }));
@@ -894,7 +895,8 @@ async function handleStream(type, id, config) {
 
   const inFlight = [];        // per-source promise + settled result for the fallback wait
   const races = activeSources.map((src) => {
-    const key = `${src.source}:${matchId}:${src.id}`;
+    const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
+    const key = `${src.source}:${matchId}:${src.id}${subKey}`;
     const state = { key, promise: null, settled: false, value: [] };
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key))
@@ -1123,12 +1125,21 @@ async function handleStream(type, id, config) {
       channelName = '';
     }
 
+    let serverBadge = '';
+    const rawServer = s._streamSource || s.streamSource;
+    if (rawServer && typeof rawServer === 'string') {
+      const trimmed = rawServer.trim();
+      if (trimmed) {
+        serverBadge = ` [${trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase()}]`;
+      }
+    }
+
     const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
     const bitrateText = s.bitrate ? ` · ${s.bitrate}` : '';
-    s.title = `${icon} ${providerName}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
+    s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};

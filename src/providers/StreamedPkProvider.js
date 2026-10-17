@@ -196,6 +196,12 @@ class StreamedPkProvider extends BaseProvider {
           const results = await Promise.allSettled(resolvePromises);
           for (const result of results) {
             if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+              for (const s of result.value) {
+                if (s) {
+                  s._streamSource = streamSource;
+                  s.streamSource = streamSource;
+                }
+              }
               streams.push(...result.value);
             }
           }
