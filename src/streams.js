@@ -445,8 +445,8 @@ function repairRefererFor(targetUrl) {
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
-    // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
+    if (!s.url || s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -1048,6 +1048,8 @@ async function handleStream(type, id, config) {
     else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
     else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
     else if (s._source === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
+    else if (s._source === 'hockeyreplays' || (s.title && s.title.toLowerCase().includes('hockeyreplays'))) providerName = 'HockeyReplays';
+    else if (s._source === 'mlblive' || (s.title && s.title.toLowerCase().includes('mlblive'))) providerName = 'MLBLive';
 
     let originalTitle = s.title || '';
     let channelName = '';

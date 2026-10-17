@@ -332,11 +332,13 @@ class HockeyReplaysProvider extends BaseProvider {
 
           streams.push(new StreamEntity({
             name: title,
+            title: title,
             url: v.url,
             isDirect: true,
+            resolution: label,
             behaviorHints: {
               proxyHeaders: okProxyHeaders,
-              notWebReady: true
+              notWebReady: false
             }
           }));
         }
@@ -347,11 +349,12 @@ class HockeyReplaysProvider extends BaseProvider {
         const title = cleanPart ? `HockeyReplays (${cleanPart} - Adaptive HLS)` : 'HockeyReplays (Adaptive HLS)';
         streams.push(new StreamEntity({
           name: title,
+          title: title,
           url: metaObj.hlsMasterPlaylistUrl,
           isDirect: true,
           behaviorHints: {
             proxyHeaders: okProxyHeaders,
-            notWebReady: true
+            notWebReady: false
           }
         }));
       }
