@@ -31,6 +31,7 @@ const NflVideoProvider = require('./providers/NflVideoProvider');
 const FullRacesProvider = require('./providers/FullRacesProvider');
 const HockeyReplaysProvider = require('./providers/HockeyReplaysProvider');
 const MlbLiveProvider = require('./providers/MlbLiveProvider');
+const VavooProvider = require('./providers/VavooProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 
 const container = createContainer({
@@ -79,6 +80,7 @@ container.register({
   fullRacesProvider: asClass(FullRacesProvider).singleton(),
   hockeyReplaysProvider: asClass(HockeyReplaysProvider).singleton(),
   mlbLiveProvider: asClass(MlbLiveProvider).singleton(),
+  vavooProvider: asClass(VavooProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 
