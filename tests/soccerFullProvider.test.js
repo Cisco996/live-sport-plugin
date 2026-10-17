@@ -285,4 +285,82 @@ describe('SoccerFullProvider', () => {
       expect(soccerfullDirect).toEqual([]);
     });
   });
+
+  describe('Modern Post-ID & OK.ru Stream Resolution', () => {
+    test('extracts post-id container as Full Match server option', () => {
+      const modernHtml = `
+        <div class="header-play">
+          <div id="video" post-id="4531">
+            <div class="cssloading">Loading video...</div>
+          </div>
+        </div>
+      `;
+      const servers = provider._extractServerOptions(modernHtml);
+      expect(servers).toHaveLength(1);
+      expect(servers[0].sid).toBe('4531');
+      expect(servers[0].label).toBe('Full Match');
+    });
+
+    test('extracts OK.ru direct 1080p MP4 and Auto HLS streams with okcdn.ru URLs', async () => {
+      const undici = require('undici');
+      const fakeOkHtml = `
+        <div data-module="OKVideo" data-options='{"flashvars":{"metadata":"{\\"videos\\":[{\\"name\\":\\"full\\",\\"url\\":\\"https://vd517.okcdn.ru/video.mp4\\"},{\\"name\\":\\"sd\\",\\"url\\":\\"https://vd517.okcdn.ru/video_sd.mp4\\"}],\\"hlsManifestUrl\\":\\"https://vd517.okcdn.ru/video.m3u8\\"}"}}'></div>
+      `;
+
+      jest.spyOn(undici, 'request').mockResolvedValueOnce({
+        statusCode: 200,
+        body: { text: async () => fakeOkHtml }
+      });
+
+      const streams = await provider._resolveOkRu('https://ok.ru/videoembed/9154553055991', 'Full Match');
+      expect(streams).toHaveLength(2);
+
+      const mp4Stream = streams[0];
+      expect(mp4Stream).toBeInstanceOf(StreamEntity);
+      expect(mp4Stream.name).toBe('SoccerFull');
+      expect(mp4Stream.title).toBe('[VOD] Full Match (1080p) [OK.ru]');
+      expect(mp4Stream.resolution).toBe('1080p');
+      expect(mp4Stream.url).toBe('https://vd517.okcdn.ru/video.mp4');
+      expect(mp4Stream.behaviorHints.notWebReady).toBe(false);
+      expect(mp4Stream.behaviorHints.proxyHeaders.request.Referer).toBe('https://ok.ru/');
+
+      const hlsStream = streams[1];
+      expect(hlsStream).toBeInstanceOf(StreamEntity);
+      expect(hlsStream.title).toBe('[VOD] Full Match (Auto HLS) [OK.ru]');
+      expect(hlsStream.resolution).toBe('Auto');
+      expect(hlsStream.url).toBe('https://vd517.okcdn.ru/video.m3u8');
+    });
+
+    test('prioritizes OK.ru zero-bandwidth streams over others in resolveStream', async () => {
+      jest.spyOn(provider.fetchPage, 'fire').mockResolvedValueOnce(`
+        <div id="video" post-id="4502"></div>
+        <a href="?sid=16810" class="video-server">1st Half</a>
+      `);
+
+      jest.spyOn(provider, '_resolveServerStream').mockImplementation(async (server) => {
+        if (server.sid === '4502') {
+          return [new StreamEntity({
+            name: 'SoccerFull',
+            title: '[VOD] Full Match (1080p) [OK.ru]',
+            resolution: '1080p',
+            url: 'https://vd438.okcdn.ru/ok.mp4'
+          })];
+        }
+        if (server.sid === '16810') {
+          return [new StreamEntity({
+            name: 'SoccerFull',
+            title: '[VOD] 1st Half (1080p) [Vidara]',
+            resolution: '1080p',
+            url: 'https://s14.97bf1.com/hls.m3u8'
+          })];
+        }
+        return [];
+      });
+
+      const streams = await provider.resolveStream('/celta-vigo-vs-juventus-4502.html');
+      expect(streams).toHaveLength(2);
+      expect(streams[0].title).toContain('[OK.ru]');
+      expect(streams[1].title).toContain('[Vidara]');
+    });
+  });
 });

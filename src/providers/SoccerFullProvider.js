@@ -249,6 +249,16 @@ class SoccerFullProvider extends BaseProvider {
         }
       }
 
+      // Prioritize reliable, zero-bandwidth CDN streams (OK.ru, Vixeo)
+      streams.sort((a, b) => {
+        const getScore = (s) => {
+          if (s.title && s.title.includes('OK.ru')) return 100;
+          if (s.title && s.title.includes('Vixeo')) return 80;
+          return 10;
+        };
+        return getScore(b) - getScore(a);
+      });
+
       if (streams.length > 0) {
         this._setCache(this._matchPageCache, fullUrl, streams, 30 * 60 * 1000);
       }
@@ -267,7 +277,16 @@ class SoccerFullProvider extends BaseProvider {
     const servers = [];
     const seenSids = new Set();
 
-    // 1. Parse video-server buttons: <a href="...?sid=16484" class="video-server ...">1st Half</a>
+    // 1. Extract modern post-id or data-id from the main player container
+    const postIdMatch = html.match(/id="video"[^>]*\s+post-id="(\d+)"/i) ||
+                        html.match(/post-id="(\d+)"/i) ||
+                        html.match(/data-id="(\d+)"/i);
+    if (postIdMatch && !seenSids.has(postIdMatch[1])) {
+      seenSids.add(postIdMatch[1]);
+      servers.push({ sid: postIdMatch[1], label: 'Full Match' });
+    }
+
+    // 2. Parse video-server buttons: <a href="...?sid=16484" class="video-server ...">1st Half</a>
     const btnRegex = /<a\s+[^>]*href=["'][^"']*[?&]sid=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = btnRegex.exec(html)) !== null) {
@@ -286,9 +305,10 @@ class SoccerFullProvider extends BaseProvider {
       }
     }
 
-    // 2. Also check if the default iframe has an SID not yet captured
+    // 3. Also check if the default iframe has an SID not yet captured
     const defaultIframe = html.match(/<iframe[^>]+src=["']\/play\/(\d+)["']/i);
     if (defaultIframe && !seenSids.has(defaultIframe[1])) {
+      seenSids.add(defaultIframe[1]);
       servers.unshift({ sid: defaultIframe[1], label: 'Highlights' });
     }
 
@@ -331,8 +351,15 @@ class SoccerFullProvider extends BaseProvider {
 
       const streams = [];
 
-      // A. Vixeo host (vixeo.io)
-      if (iframeSrc.includes('vixeo.io')) {
+      // A. OK.ru embed (direct high-speed CDN, zero VPS bandwidth)
+      if (/ok\.ru/i.test(iframeSrc)) {
+        const okStreams = await this._resolveOkRu(iframeSrc, label);
+        if (Array.isArray(okStreams) && okStreams.length > 0) {
+          streams.push(...okStreams);
+        }
+      }
+      // B. Vixeo host (vixeo.io)
+      else if (iframeSrc.includes('vixeo.io')) {
         const streamUrl = await this.extractVixeo(iframeSrc);
         if (streamUrl) {
           const cleanLabel = this._formatPartLabel(label);
@@ -347,7 +374,7 @@ class SoccerFullProvider extends BaseProvider {
           }));
         }
       }
-      // B. Vidara host (vidaraa.cc / gbsagbo.com)
+      // C. Vidara host (vidaraa.cc / gbsagbo.com)
       else if (iframeSrc.includes('vidaraa.cc') || iframeSrc.includes('gbsagbo.com')) {
         const streamUrl = await this.extractVidara(iframeSrc);
         if (streamUrl) {
@@ -363,7 +390,7 @@ class SoccerFullProvider extends BaseProvider {
           }));
         }
       }
-      // C. Byse / SprintCDN host (bysefujedu.com, bysesukior.com, byse*, filemoon)
+      // D. Byse / SprintCDN host (bysefujedu.com, bysesukior.com, byse*, filemoon)
       else if (/byse|bysesukior|bysefujedu|filemoon/i.test(iframeSrc)) {
         const byseStreams = await this.extractByse(iframeSrc, label);
         if (Array.isArray(byseStreams) && byseStreams.length > 0) {
@@ -377,6 +404,95 @@ class SoccerFullProvider extends BaseProvider {
 
       return streams;
     } catch (err) {
+      return [];
+    }
+  }
+
+  /**
+   * Resolves direct high-speed okcdn.ru streams from OK.ru embeds.
+   * Zero VPS bandwidth consumed, direct edge CDN playback.
+   */
+  async _resolveOkRu(url, partName = '') {
+    try {
+      const match = url.match(/videoembed\/(\d+)/) || url.match(/video\/(\d+)/);
+      if (!match) return [];
+      const videoId = match[1];
+
+      const normUrl = `https://ok.ru/videoembed/${videoId}`;
+      const res = await undici.request(normUrl, {
+        headers: {
+          ...this.defaultHeaders,
+          Referer: 'https://ok.ru/'
+        },
+        headersTimeout: 6000,
+        bodyTimeout: 6000
+      });
+
+      if (res.statusCode !== 200) return [];
+      const html = await res.body.text();
+
+      const optionsMatch = html.match(/data-options="([^"]+)"/i) ||
+                           html.match(/data-options='([^']+)'/i) ||
+                           html.match(/data-module="OKVideo"[^>]*data-options="([^"]+)"/i) ||
+                           html.match(/data-module="OKVideo"[^>]*data-options='([^']+)'/i);
+      if (!optionsMatch) return [];
+
+      const rawJson = optionsMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+      const parsed = JSON.parse(rawJson);
+      const meta = parsed.flashvars && parsed.flashvars.metadata;
+      let metaObj = meta;
+      if (typeof meta === 'string') {
+        try { metaObj = JSON.parse(meta); } catch (_) {}
+      }
+      if (!metaObj) return [];
+
+      const streams = [];
+      const cleanPart = this._formatPartLabel(partName);
+      const qualityMap = { 'full': '1080p', 'hd': '720p', 'sd': '480p', 'low': '360p', 'lowest': '240p', 'mobile': '144p' };
+      const qualityWeight = { 'full': 1080, '1080p': 1080, 'hd': 720, '720p': 720, 'sd': 480, '480p': 480, 'low': 360, 'lowest': 240, 'mobile': 144 };
+
+      const okProxyHeaders = {
+        request: {
+          'User-Agent': this.defaultHeaders['User-Agent'],
+          Referer: 'https://ok.ru/'
+        }
+      };
+
+      if (Array.isArray(metaObj.videos) && metaObj.videos.length > 0) {
+        const validVideos = metaObj.videos.filter(v => v && v.url);
+        validVideos.sort((a, b) => (qualityWeight[b.name] || 0) - (qualityWeight[a.name] || 0));
+        const bestVideo = validVideos[0];
+        if (bestVideo) {
+          const label = qualityMap[bestVideo.name] || bestVideo.name || '1080p';
+          const title = cleanPart ? `[VOD] ${cleanPart} (${label}) [OK.ru]` : `[VOD] Full Match (${label}) [OK.ru]`;
+          streams.push(new StreamEntity({
+            name: 'SoccerFull',
+            title,
+            resolution: label,
+            url: bestVideo.url,
+            behaviorHints: {
+              notWebReady: false,
+              proxyHeaders: okProxyHeaders
+            }
+          }));
+        }
+      }
+
+      if (metaObj.hlsManifestUrl) {
+        streams.push(new StreamEntity({
+          name: 'SoccerFull',
+          title: cleanPart ? `[VOD] ${cleanPart} (Auto HLS) [OK.ru]` : '[VOD] Full Match (Auto HLS) [OK.ru]',
+          resolution: 'Auto',
+          url: metaObj.hlsManifestUrl,
+          behaviorHints: {
+            notWebReady: false,
+            proxyHeaders: okProxyHeaders
+          }
+        }));
+      }
+
+      return streams;
+    } catch (_) {
       return [];
     }
   }
