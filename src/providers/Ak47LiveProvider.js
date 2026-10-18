@@ -4,6 +4,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
+const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 
 const DEFAULT_REFERER = 'http://www.fawanews.sc/';
 const DEFAULT_ORIGIN = 'http://www.fawanews.sc';
@@ -150,13 +151,19 @@ class Ak47LiveProvider extends BaseProvider {
     // Clean up trailing dashes or delimiters
     title = title.replace(/[-–—\s]+$/, '').trim();
 
-    // Parse team1 and team2 if "vs" or "v" or "@" delimiter exists
+    // Parse team1 and team2 using TeamNameExtractor if possible, or fallback regex
     let team1 = null;
     let team2 = null;
-    const vsMatch = title.match(/^(.+?)\s+(?:vs\.?|v\.?|@)\s+(.+?)$/i);
-    if (vsMatch) {
-      team1 = vsMatch[1].trim();
-      team2 = vsMatch[2].trim();
+    const derived = extractTeamsFromTitle(title);
+    if (derived && derived.length === 2) {
+      team1 = derived[0];
+      team2 = derived[1];
+    } else {
+      const vsMatch = title.match(/^(.+?)\s+(?:vs\.?|v\.?|@)\s+(.+?)$/i);
+      if (vsMatch) {
+        team1 = vsMatch[1].trim();
+        team2 = vsMatch[2].trim();
+      }
     }
 
     // Canonical category
@@ -221,16 +228,18 @@ class Ak47LiveProvider extends BaseProvider {
                 existing.sources.push(sourceObj);
               }
             } else {
+              const isMatchup = Boolean(team1 && team2);
               const match = new MatchEntity({
                 id: matchId,
                 title,
                 category,
+                league: entry.groupTitle || '',
                 date: now.toString(),
                 status: 'LIVE',
-                team1,
-                team2,
-                thumbnail_url: entry.tvgLogo,
-                poster: entry.tvgLogo,
+                team1: team1 ? { name: team1 } : null,
+                team2: team2 ? { name: team2 } : null,
+                thumbnail_url: isMatchup ? '' : (entry.tvgLogo || ''),
+                poster: '',
                 sources: [sourceObj]
               });
               matchesMap.set(matchId, match);
