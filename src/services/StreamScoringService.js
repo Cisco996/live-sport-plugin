@@ -39,16 +39,25 @@ class StreamScoringService {
     if (isTikTok) {
       score -= 30; // Deprioritize worker-heavy streams
     } else {
-      // Direct CDN bonus for providers that bypass Cloudflare Workers entirely
-      const directCdnSources = ['vavoo', 'golf', 'ppvst', 'daddylive', 'damitv', 'sktech'];
-      if (directCdnSources.includes(sourceName) || (streamEntity._source && directCdnSources.includes(streamEntity._source))) {
+      // Direct CDN bonus for providers that bypass Cloudflare Workers entirely:
+      // DaddyLive is top (+20), Vavoo is solid (+15, higher than SKTech's +10)
+      if (sourceName === 'daddylive' || streamEntity._source === 'daddylive') {
         score += 20;
+      } else if (sourceName === 'vavoo' || streamEntity._source === 'vavoo') {
+        score += 15;
+      } else if (sourceName === 'sktech' || streamEntity._source === 'sktech') {
+        score += 10;
+      } else {
+        const otherDirect = ['golf', 'ppvst', 'damitv'];
+        if (otherDirect.includes(sourceName) || (streamEntity._source && otherDirect.includes(streamEntity._source))) {
+          score += 10;
+        }
       }
     }
 
     // 4. Source Reliability
     // Non-TikTok reliable sources
-    const reliableSources = ['golf', 'echo', 'delta', 'vavoo', 'daddylive', 'ppvst'];
+    const reliableSources = ['daddylive', 'golf', 'echo', 'delta', 'vavoo', 'ppvst'];
     if (!isTikTok && reliableSources.includes(sourceName)) {
       score += 15;
     } else if (sourceName === 'timstreams') {

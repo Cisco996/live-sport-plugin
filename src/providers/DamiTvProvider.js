@@ -288,22 +288,34 @@ class DamiTvProvider extends BaseProvider {
 
       if (extractData && extractData.success) {
         if (extractData.hlsUrl) {
-          streams.push(new StreamEntity({
+          const isTikTokStream = Boolean(/streamed\/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(extractData.hlsUrl));
+          const s = new StreamEntity({
             name: this.name,
             title: matchTitle,
             url: proxy(extractData.hlsUrl),
             behaviorHints: { notWebReady: true },
             resolution: 'HD'
-          }));
+          });
+          if (isTikTokStream) {
+            s.isTikTok = true;
+            s._isTikTok = true;
+          }
+          streams.push(s);
         }
         if (extractData.sdUrl) {
-          streams.push(new StreamEntity({
+          const isTikTokStream = Boolean(/streamed\/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(extractData.sdUrl));
+          const s = new StreamEntity({
             name: this.name,
             title: matchTitle,
             url: proxy(extractData.sdUrl),
             behaviorHints: { notWebReady: true },
             resolution: 'SD'
-          }));
+          });
+          if (isTikTokStream) {
+            s.isTikTok = true;
+            s._isTikTok = true;
+          }
+          streams.push(s);
         }
       }
 

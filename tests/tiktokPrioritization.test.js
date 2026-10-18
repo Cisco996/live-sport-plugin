@@ -23,11 +23,25 @@ describe('TikTok CDN Deprioritization & Worker Quota Saver', () => {
   });
 
   describe('StreamScoringService', () => {
-    test('awards Direct CDN bonus (+20) to Vavoo and DaddyLive', () => {
+    test('awards top Direct CDN bonus to DaddyLive and keeps Vavoo higher than SKTech', () => {
+      const daddyliveStream = { url: 'https://castr.example/index.m3u8', resolution: '1080p' };
       const vavooStream = { url: 'https://sunshine.example/index.m3u8', resolution: '1080p' };
-      const score = scorer.calculateScore(vavooStream, 'vavoo');
-      // base 50 + 30 (url) + 20 (1080p) + 20 (direct CDN) + 15 (reliable) = 135
-      expect(score).toBe(135);
+      const sktechStream = { url: 'https://sktech.example/index.m3u8', resolution: '1080p' };
+
+      const daddyliveScore = scorer.calculateScore(daddyliveStream, 'daddylive');
+      const vavooScore = scorer.calculateScore(vavooStream, 'vavoo');
+      const sktechScore = scorer.calculateScore(sktechStream, 'sktech');
+
+      // DaddyLive: 50 + 30 + 20 + 20 + 15 = 135
+      expect(daddyliveScore).toBe(135);
+      // Vavoo: 50 + 30 + 20 + 15 + 15 = 130
+      expect(vavooScore).toBe(130);
+      // SKTech: 50 + 30 + 20 + 10 = 110
+      expect(sktechScore).toBe(110);
+
+      // Hierarchy: DaddyLive >= Vavoo > SKTech
+      expect(daddyliveScore).toBeGreaterThanOrEqual(vavooScore);
+      expect(vavooScore).toBeGreaterThan(sktechScore);
     });
 
     test('penalizes TikTok CDN streams (-30) and strips reliability bonus', () => {
@@ -53,7 +67,7 @@ describe('TikTok CDN Deprioritization & Worker Quota Saver', () => {
       const adminScore = scorer.calculateScore(tiktokAdmin, 'admin');
 
       expect(golfScore).toBeGreaterThan(adminScore);
-      expect(golfScore - adminScore).toBeGreaterThanOrEqual(60);
+      expect(golfScore - adminScore).toBeGreaterThanOrEqual(50);
     });
   });
 
