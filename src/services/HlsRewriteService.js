@@ -84,14 +84,7 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
   }
 
-  // Plain MPEG-TS segments (e.g. the Streamed.pk 540p variant served by lb*.strmd.st):
-  // Relay via local /api/hlschunk (or direct) without burning Cloudflare Worker requests.
-  if (/\.ts(\?|$)/.test(absoluteUrl) && absoluteUrl.includes('strmd.st')) {
-    let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
-    if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
-    if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
-    return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
-  }
+  // Plain MPEG-TS segments stream directly from the upstream CDN (0 VPS bandwidth bleeding).
 
   const isPureDisguisedTs = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js');
   if (isPureDisguisedTs && !absoluteUrl.includes('.ts')) {
