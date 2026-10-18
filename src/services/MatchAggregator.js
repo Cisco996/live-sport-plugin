@@ -225,6 +225,53 @@ function _teamsSimilar(a, b) {
   return minLen > 0 && (common / minLen) >= 0.7;
 }
 
+const COUNTRY_CANONICAL = {
+  'uk': 'united kingdom',
+  'gb': 'united kingdom',
+  'great britain': 'united kingdom',
+  'england': 'united kingdom',
+  'united kingdom': 'united kingdom',
+  'us': 'united states',
+  'usa': 'united states',
+  'united states': 'united states',
+  'de': 'germany',
+  'ger': 'germany',
+  'deutschland': 'germany',
+  'germany': 'germany',
+  'fr': 'france',
+  'fra': 'france',
+  'france': 'france',
+  'es': 'spain',
+  'esp': 'spain',
+  'spain': 'spain',
+  'it': 'italy',
+  'ita': 'italy',
+  'italy': 'italy',
+  'tr': 'turkey',
+  'tur': 'turkey',
+  'turkey': 'turkey',
+  'pl': 'poland',
+  'pol': 'poland',
+  'polska': 'poland',
+  'poland': 'poland',
+  'pt': 'portugal',
+  'por': 'portugal',
+  'portugal': 'portugal',
+  'nl': 'netherlands',
+  'ned': 'netherlands',
+  'holland': 'netherlands',
+  'netherlands': 'netherlands',
+  'ar': 'arabia',
+  'arabic': 'arabia',
+  'arabia': 'arabia'
+};
+
+function _normalizeCountry(c) {
+  if (!c) return '';
+  const s = String(c).toLowerCase().trim();
+  return COUNTRY_CANONICAL[s] || s;
+}
+
 const MOTORSPORT_GENERICS = new Set([
   'grandprix', 'gp', 'formulaone', 'formulatwo', 'formulathree', 'formulafour', 'formulae',
   'f1', 'f2', 'f3', 'f4', 'fe', 'motogp', 'moto2', 'moto3', 'nascar', 'xfinity', 'indycar', 'wsbk', 'wrc', 'dtm', 'rally', 'superbike',
@@ -474,7 +521,11 @@ class MatchAggregator {
         .join(','),
       status: e && e.status ? String(e.status) : '',
       isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'),
-      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_')
+      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'),
+      league: e && e.league ? String(e.league).toLowerCase().trim() : '',
+      group: (e && e.sources && e.sources[0] && (e.sources[0].group || e.sources[0].country))
+        ? String(e.sources[0].group || e.sources[0].country).toLowerCase().trim()
+        : (e && e.group ? String(e.group).toLowerCase().trim() : '')
     };
   }
 
@@ -589,6 +640,17 @@ class MatchAggregator {
 
     // 6b. Both channel-like: strict identity only. Distinct channels with shared
     //     branding must never merge.
+    if (p1.isChannel && p2.isChannel) {
+      if (p1.norm !== p2.norm) return false;
+      const g1 = _normalizeCountry(p1.group || p1.league || '');
+      const g2 = _normalizeCountry(p2.group || p2.league || '');
+      const genericGroups = new Set(['live tv', 'general', 'channels', 'networks', 'other', '']);
+      const isG1Generic = genericGroups.has(g1);
+      const isG2Generic = genericGroups.has(g2);
+      if (isG1Generic !== isG2Generic) return false;
+      if (!isG1Generic && !isG2Generic && g1 !== g2) return false;
+      return true;
+    }
     if (p1.norm === p2.norm) return true;
 
     // 6c. Motorsport specific fallback: Formula 1, MotoGP, NASCAR, etc.

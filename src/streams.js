@@ -456,8 +456,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       return null;
     }
 
-    // We only pre-flight check direct live streams (m3u8 urls). Web player links, third-party CDN tokens (Vavoo Sunshine), or direct VODs are kept blindly.
-    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/sunshine/') || s._source === 'vavoo' || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
+    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';

@@ -259,10 +259,24 @@ class VavooProvider extends BaseProvider {
 
     return catalog.map(ch => {
       const isPopular = ch.is4k || (ch.group === 'United Kingdom' && /sky sport|tnt sport/i.test(ch.name));
+      const hasGroup = ch.group && typeof ch.group === 'string' && !/^(?:live tv|general|channels|networks|other)$/i.test(ch.group.trim());
+      const groupLower = hasGroup ? ch.group.toLowerCase().trim() : '';
+      const nameLower = ch.name.toLowerCase();
+      const groupInName = hasGroup && (
+        nameLower.includes(groupLower) ||
+        (groupLower === 'united kingdom' && /\b(?:uk)\b/i.test(nameLower)) ||
+        (groupLower === 'united states' && /\b(?:usa?)\b/i.test(nameLower)) ||
+        (groupLower === 'germany' && /\b(?:de|ger)\b/i.test(nameLower)) ||
+        (groupLower === 'france' && /\b(?:fr)\b/i.test(nameLower)) ||
+        (groupLower === 'spain' && /\b(?:es)\b/i.test(nameLower)) ||
+        (groupLower === 'italy' && /\b(?:it)\b/i.test(nameLower)) ||
+        (groupLower === 'turkey' && /\b(?:tr)\b/i.test(nameLower))
+      );
+      const displayTitle = (hasGroup && !groupInName) ? `${ch.name} (${ch.group})` : ch.name;
       return new MatchEntity({
         id: `vavoo_ch_${ch.id}`,
-        title: ch.name,
-        baseTitle: ch.name,
+        title: displayTitle,
+        baseTitle: displayTitle,
         category: 'networks',
         date: '0', // Evergreen — 24/7 continuous channel
         popular: isPopular ? '1' : '0',
