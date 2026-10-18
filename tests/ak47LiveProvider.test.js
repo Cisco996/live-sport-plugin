@@ -222,7 +222,7 @@ http://193.47.62.1:8080/live/game.m3u8
       expect(hasAk47).toBe(true);
     });
 
-    test('selectSources ranks ak47live with Priority 1 and keeps it in fallback list', () => {
+    test('selectSources ranks DaddyLive at Priority 1, ak47live at Priority 2, and keeps it in fallback list', () => {
       const { selectSources } = require('../src/streams');
       const sources = [
         { source: 'streamedpk', id: 'sp1' },
@@ -232,12 +232,14 @@ http://193.47.62.1:8080/live/game.m3u8
       ];
 
       const sorted = selectSources(sources);
-      expect(sorted[0].source).toBe('ak47live');
+      expect(sorted[0].source).toBe('daddylive');
+      expect(sorted[1].source).toBe('ak47live');
       expect(sorted.some(s => s.source === 'ak47live')).toBe(true);
 
       const withConfig = selectSources(sources, { sources: 'ak47live,daddylive' });
       expect(withConfig.length).toBe(2);
-      expect(withConfig[0].source).toBe('ak47live');
+      expect(withConfig[0].source).toBe('daddylive');
+      expect(withConfig[1].source).toBe('ak47live');
     });
   });
 });

@@ -23,9 +23,37 @@ function isEventStreamSource(src) {
   return false;
 }
 
+const SOURCE_PRIORITY = {
+  daddylive: 1,
+  vavoo: 2,
+  sktech: 2,
+  ppvst: 2,
+  damitv: 2,
+  ak47live: 2,
+  golf: 2,
+  delta: 2,
+  echo: 2,
+  replayzone: 2,
+  livetv: 2,
+  soccerfull: 2,
+  basketballvideo: 2,
+  nflvideo: 2,
+  fullraces: 2,
+  hockeyreplays: 2,
+  mlblive: 2,
+  watchfooty: 2,
+  admin: 3,
+  streamedpk: 3,
+  embedindia: 3,
+  embedst: 3,
+  cdnlive: 3,
+  streamsports99: 4,
+  timstreams: 9,
+  streamsports: 13
+};
+
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { vavoo: 1, golf: 1, ppvst: 1, ak47live: 1, daddylive: 2, sktech: 2, damitv: 2, delta: 2, echo: 2, replayzone: 2, livetv: 2, soccerfull: 2, basketballvideo: 2, nflvideo: 2, fullraces: 2, hockeyreplays: 2, mlblive: 2, watchfooty: 2, admin: 3, cdnlive: 3, streamsports99: 4, embedindia: 5, embedst: 5, streamedpk: 5, timstreams: 9, streamsports: 13 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
@@ -926,7 +954,8 @@ async function handleStream(type, id, config) {
   const races = activeSources.map((src) => {
     const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
     const key = `${src.source}:${matchId}:${src.id}${subKey}`;
-    const state = { key, promise: null, settled: false, value: [] };
+    const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
+    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key))
       .then((minted) => {
@@ -953,21 +982,37 @@ async function handleStream(type, id, config) {
     if (Array.isArray(r.value.value)) streams.push(...r.value.value);
   }
 
-  // If nothing usable arrived by the soft deadline, spend the remaining hard
-  // budget waiting. Return the completed results once that budget runs out.
-  if (streams.length === 0 && inFlight.length > 0) {
+  // If nothing usable arrived by the soft deadline, OR if priority-1 sources (DaddyLive)
+  // are still in flight, wait for them up to the remaining hard budget.
+  // This guarantees fast streams (e.g. Vavoo) do not cut off DaddyLive with an early return,
+  // while still returning instantly as soon as DaddyLive completes (or when already cached).
+  const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
+  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0) && inFlight.length > 0;
+
+  if (shouldWait) {
     const remaining = Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
     if (remaining > 0) {
+      // If we already have streams and are waiting for Priority-1 (DaddyLive), wait specifically
+      // for the Priority-1 promises to complete so we return immediately without stalling.
+      const waitTargets = priority1InFlight.length > 0
+        ? priority1InFlight.map((f) => f.promise)
+        : inFlight.map((f) => f.promise);
+
       await settleBefore(
-        Promise.allSettled(inFlight.map((f) => f.promise)),
+        Promise.allSettled(waitTargets),
         remaining,
         null
       );
     }
     for (const f of inFlight) {
-      // Snapshot only completed resolutions. Awaiting each promise here would
-      // defeat the hard deadline and let a stalled source block the response.
-      if (f.settled) streams.push(...f.value);
+      // Snapshot newly settled resolutions without duplicating
+      if (f.settled && Array.isArray(f.value)) {
+        for (const st of f.value) {
+          if (!streams.includes(st)) {
+            streams.push(st);
+          }
+        }
+      }
     }
     lateCount = inFlight.filter(f => !f.settled).length;
   } else if (lateCount > 0) {

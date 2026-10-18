@@ -167,7 +167,7 @@ describe('MatchAggregator Broadcaster Fixture Enrichment', () => {
 });
 
 describe('Stream Source Priority Integration', () => {
-  test('selectSources ranks Vavoo at priority 1 ahead of DaddyLive and secondary sources', () => {
+  test('selectSources ranks DaddyLive at priority 1 ahead of Vavoo and secondary sources', () => {
     const sources = [
       { source: 'streamsports99', id: '3' },
       { source: 'daddylive', id: '2' },
@@ -176,8 +176,8 @@ describe('Stream Source Priority Integration', () => {
     ];
 
     const selected = selectSources(sources, null);
-    expect(selected[0].source).toBe('vavoo');
-    expect(selected[1].source).toBe('daddylive');
+    expect(selected[0].source).toBe('daddylive');
+    expect(selected[1].source).toBe('vavoo');
     expect(selected[2].source).toBe('streamsports99');
     expect(selected[3].source).toBe('timstreams');
   });
