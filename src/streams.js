@@ -25,7 +25,7 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'vavoo': 1, 'daddylive': 2, 'sktech': 2, 'replayzone': 2, 'livetv': 2, 'soccerfull': 2, 'basketballvideo': 2, 'nflvideo': 2, 'fullraces': 2, 'hockeyreplays': 2, 'mlblive': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { vavoo: 1, golf: 1, ppvst: 1, daddylive: 2, sktech: 2, damitv: 2, delta: 2, echo: 2, replayzone: 2, livetv: 2, soccerfull: 2, basketballvideo: 2, nflvideo: 2, fullraces: 2, hockeyreplays: 2, mlblive: 2, watchfooty: 2, admin: 3, cdnlive: 3, streamsports99: 4, embedindia: 5, embedst: 5, streamedpk: 5, timstreams: 9, streamsports: 13 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
@@ -290,6 +290,11 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
       stream.targetDuration = info.targetDuration;
     }
     if (!info || !info.firstSegmentUri || !info.firstSegmentDuration) return;
+
+    if (info.firstSegmentUri && /\.image|tiktokcdn|byteoversea|ibytedtos/i.test(info.firstSegmentUri)) {
+      stream.isTikTok = true;
+      stream._isTikTok = true;
+    }
 
     const segmentUrl = buildPlayerSegmentUrl(info.firstSegmentUri, manifestUrl, referer, origin);
     const controller = new AbortController();
@@ -636,6 +641,24 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
           await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
         }
+      }
+
+      // Detect TikTok CDN / ByteDance proxy-heavy streams (.image fake WebP chunks)
+      const isTikTok = Boolean(
+        s.isTikTok || s._isTikTok ||
+        (bodySample && /tiktokcdn|byteoversea|ibytedtos|byteimg|bytegoofy|cowedd4855ws|bytedance|\.image|tplv-/i.test(bodySample)) ||
+        (targetUrl && /tiktokcdn|byteoversea|ibytedtos|\.image/i.test(targetUrl)) ||
+        (s.url && /tiktokcdn|byteoversea|ibytedtos|\.image/i.test(s.url))
+      );
+      if (isTikTok) {
+        s.isTikTok = true;
+        s._isTikTok = true;
+        try {
+          const streamScorer = container.resolve('streamScorer');
+          if (streamScorer && typeof streamScorer.calculateScore === 'function') {
+            s.score = streamScorer.calculateScore(s, s._source || '');
+          }
+        } catch (_) {}
       }
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);

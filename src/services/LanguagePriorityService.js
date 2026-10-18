@@ -290,6 +290,13 @@ function compareStreams(a, b, priorities) {
     const formatDelta = streamFormatTier(a) - streamFormatTier(b);
     if (formatDelta) return formatDelta;
 
+    // CDN / Cloudflare Worker Tier:
+    // Prioritize clean direct CDN feeds over TikTok CDN feeds that require
+    // Cloudflare Worker uncloaking for every .image chunk.
+    const aIsTikTok = (a && (a.isTikTok || a._isTikTok)) ? 1 : 0;
+    const bIsTikTok = (b && (b.isTikTok || b._isTikTok)) ? 1 : 0;
+    if (aIsTikTok !== bIsTikTok) return aIsTikTok - bIsTikTok;
+
     return streamRankScore(b) - streamRankScore(a);
   } catch (_) {
     // A comparator that throws leaves the array in an undefined order (V8 may
