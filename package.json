@@ -12,6 +12,7 @@
     "test:sanity": "node scripts/test-e2e-simulated-client.js",
     "test:247": "node scripts/test-247-channels.js",
     "test:compare-live": "node scripts/compare-live-vs-local.js",
+    "compare:live-streams": "node scripts/compare-live-matches.js",
     "generate:provider": "node scripts/generate-provider.js",
     "check-sources": "node scripts/check-sources.js",
     "prewarm:cron": "node scripts/prewarm-cron.js",
