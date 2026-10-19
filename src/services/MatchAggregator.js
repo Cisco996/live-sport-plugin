@@ -560,7 +560,7 @@ class MatchAggregator {
     if (['nbl', 'nba', 'wnba', 'euroleague', 'eurocup', 'fiba', 'ncaa_basketball'].includes(lc)) return 'basketball';
     if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
     if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
-    if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel'].includes(lc)) return 'football';
+    if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel', 'soccer', 'football'].includes(lc)) return 'football';
     if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
     if (['mlb', 'npb'].includes(lc)) return 'baseball';
     if (['nhl', 'khl', 'ice hockey', 'ice_hockey', 'icehockey'].includes(lc)) return 'hockey';
@@ -723,8 +723,20 @@ class MatchAggregator {
     const p1 = this._precompute(primary);
     const p2 = this._precompute(secondary);
 
+    const aliasIds = new Set([
+      ...(primary.aliasIds || []),
+      ...(secondary.aliasIds || [])
+    ]);
+    if (secondary.id && secondary.id !== primary.id) {
+      aliasIds.add(secondary.id);
+    }
+    if (primary.id) {
+      aliasIds.add(primary.id);
+    }
+
     const merged = new MatchEntity({
       ...primary,
+      aliasIds: Array.from(aliasIds),
       sources: [...(primary.sources || [])]
     });
 

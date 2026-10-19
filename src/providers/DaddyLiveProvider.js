@@ -671,13 +671,14 @@ class DaddyLiveProvider extends BaseProvider {
               title = rawEvent.slice(colonIdx + 3).trim();
             }
 
-            // Refine category if generic or if league/title indicates college/ncaa
+            // Refine category if generic or if league/title/channels indicate specific sport
             let eventCategory = normalizedCategory;
-            const fullContext = `${cleanCat} ${league} ${title}`.toLowerCase();
+            const channelNames = sources.map(s => s.channelName || '').join(' ');
+            const fullContext = `${cleanCat} ${league} ${title} ${channelNames}`.toLowerCase();
             if (fullContext.includes('college') || fullContext.includes('ncaa')) {
               eventCategory = 'college';
-            } else if (eventCategory === 'other') {
-              eventCategory = this.normalizeCategory(`${cleanCat} ${league} ${title}`);
+            } else if (eventCategory === 'other' || !eventCategory || cleanCat.toLowerCase().includes('upcoming')) {
+              eventCategory = this.normalizeCategory(`${cleanCat} ${league} ${title} ${channelNames}`);
             }
 
             // Filter out well-known stale dummy fixtures left on DaddyLive's test channels

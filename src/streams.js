@@ -1194,16 +1194,15 @@ async function handleStream(type, id, config) {
       s.name = isWeb ? '🌐 Web Stream' : '⚡ Direct Stream';
     }
     
-    let countryTag = '';
+    const isChannelCard = Boolean(match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_')));
+    if (!channelName && isChannelCard) {
+      channelName = s.canonicalChannel || s.channelName || (match && match.title) || '';
+    }
+
     let countryInfo = null;
     if (channelName) {
       channelName = channelName.trim();
       countryInfo = detectChannelCountry(channelName);
-      if (countryInfo) {
-        countryTag = ` ${countryInfo.flag} [${countryInfo.name} • ${countryInfo.language}]`;
-        s.language = countryInfo.language;
-        s.country = countryInfo.name;
-      }
     }
     if (!countryInfo) {
       const fallbackChannel = s.canonicalChannel || s.channelName || (match && match.title) || '';
@@ -1211,14 +1210,31 @@ async function handleStream(type, id, config) {
         countryInfo = detectChannelCountry(fallbackChannel);
       }
     }
-    
+
+    if (countryInfo) {
+      if (!s.language) s.language = countryInfo.language;
+      if (!s.country) s.country = countryInfo.name;
+    }
+
+    const flag = (countryInfo && countryInfo.flag) || s.countryFlag || '';
+    const code = (countryInfo && countryInfo.name) || s.countryCode || (s.country && s.country.length === 2 ? s.country.toUpperCase() : '') || (countryInfo && countryInfo.country) || '';
+    const lang = (countryInfo && countryInfo.language) || s.language || '';
+    let countryTag = '';
+    if (code && lang) {
+      countryTag = ` ${flag ? flag + ' ' : ''}[${code} • ${lang}]`;
+    } else if (flag && lang) {
+      countryTag = ` ${flag} [${lang}]`;
+    } else if (flag) {
+      countryTag = ` ${flag}`;
+    }
+
     let partLabel = '';
     const partMatch = originalTitle.match(/(?:^|[\s\[\]])(Part\s*\d+|[12]nd\s*Half|[12]st\s*Half|Full\s*Match|Full\s*Replay|Long\s*Highlights?|Highlights?|\d+:\d+)(?:[\s\]\()]|$)/i);
     if (partMatch) {
       partLabel = partMatch[1].trim();
     }
     if (channelName && (channelName.toLowerCase() === 'direct' || channelName.toLowerCase() === 'browser' || channelName.toLowerCase() === 'ok.ru' || channelName.toLowerCase() === partLabel.toLowerCase())) {
-      channelName = '';
+      channelName = isChannelCard ? (s.canonicalChannel || (match && match.title) || '') : '';
     }
 
     let serverBadge = '';
@@ -1230,19 +1246,18 @@ async function handleStream(type, id, config) {
       }
     }
 
-    const isChannelCard = match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_'));
+    const isBackup = Boolean(s.isBackup || s._isBackup || (s.title && /\bbackup\b/i.test(s.title)) || (originalTitle && /\bbackup\b/i.test(originalTitle)));
+    const backupTag = isBackup ? ' [Backup]' : '';
+    const isTimeshift = Boolean(s.isTimeshift || s._isTimeshift || (s.title && /(?:\+1|\bdelay\b)/i.test(s.title)) || (originalTitle && /(?:\+1|\bdelay\b)/i.test(originalTitle)));
+    const timeshiftTag = isTimeshift ? ' [+1 Delay]' : '';
+
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
     const bitrateText = s.bitrate ? ` · ${s.bitrate}` : '';
 
-    if (isChannelCard) {
-      const channelLabel = formatChannelStreamTitle(s, match, providerName, countryInfo, quality, channelName, originalTitle);
-      s.title = `${channelLabel}${bitrateText}${viewersText}${speedText}`;
-    } else {
-      const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
-      const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
-      s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
-    }
+    const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
+    const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}${backupTag}${timeshiftTag}` : `${backupTag}${timeshiftTag}`;
+    s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};

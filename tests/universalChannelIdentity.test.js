@@ -381,7 +381,7 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       } catch (_) {}
     });
 
-    test('writes schemaVersion = 2 to disk when saving matches', () => {
+    test('writes schemaVersion = 3 to disk when saving matches', () => {
       const match = new MatchEntity({
         id: 'net_astro_cricket',
         title: 'Astro Cricket',
@@ -395,14 +395,14 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
 
       const content = JSON.parse(fs.readFileSync(cacheService.cacheFilePath, 'utf-8'));
       expect(content.schemaVersion).toBe(CacheService.CACHE_SCHEMA_VERSION);
-      expect(content.schemaVersion).toBe(2);
+      expect(content.schemaVersion).toBe(3);
       expect(content.matches.length).toBe(1);
     });
 
-    test('discards and purges legacy disk cache with schemaVersion < 2', () => {
+    test('discards and purges legacy disk cache with schemaVersion < 3', () => {
       // Simulate legacy disk cache saved before universal channel layer
       const legacyPayload = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         timestamp: Date.now(),
         matches: [{ id: 'legacy_split_card', title: 'Cartoon Network (France)', category: 'networks' }]
       };
