@@ -1240,12 +1240,21 @@ async function handleStream(type, id, config) {
     }
 
     let countryInfo = null;
-    if (channelName) {
+    // 1. If stream already has group or explicit country metadata, detect country from it FIRST!
+    if (s.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(String(s.group).trim())) {
+      countryInfo = detectChannelCountry(s.group);
+    }
+    if (!countryInfo && s.country) {
+      countryInfo = detectChannelCountry(s.country);
+    }
+    // 2. Fall back to stream's specific channelName if available
+    if (!countryInfo && s.channelName) {
+      countryInfo = detectChannelCountry(s.channelName);
+    }
+    // 3. Fall back to normalized channelName / card title
+    if (!countryInfo && channelName) {
       channelName = channelName.trim();
       countryInfo = detectChannelCountry(channelName);
-    }
-    if (!countryInfo && s.group) {
-      countryInfo = detectChannelCountry(s.group);
     }
     if (!countryInfo) {
       const fallbackChannel = s.canonicalChannel || s.channelName || (match && match.title) || '';
@@ -1256,7 +1265,9 @@ async function handleStream(type, id, config) {
 
     if (countryInfo) {
       if (!s.language) s.language = countryInfo.language;
-      if (!s.country) s.country = countryInfo.name;
+      if (!s.country) s.country = countryInfo.country || countryInfo.name;
+      if (!s.countryCode) s.countryCode = countryInfo.name;
+      if (!s.countryFlag) s.countryFlag = countryInfo.flag;
     }
 
     if (channelName) {
@@ -1267,9 +1278,9 @@ async function handleStream(type, id, config) {
         .trim();
     }
 
-    const flag = (countryInfo && countryInfo.flag) || s.countryFlag || '';
-    const code = (countryInfo && countryInfo.name) || s.countryCode || (s.country && s.country.length === 2 ? s.country.toUpperCase() : '') || (countryInfo && countryInfo.country) || '';
-    const lang = (countryInfo && countryInfo.language) || s.language || '';
+    const flag = s.countryFlag || (countryInfo && countryInfo.flag) || '';
+    const code = s.countryCode || (s.country && s.country.length === 2 ? s.country.toUpperCase() : '') || (countryInfo && countryInfo.name) || (countryInfo && countryInfo.country) || '';
+    const lang = s.language || (countryInfo && countryInfo.language) || '';
     let countryTag = '';
     if (code && lang) {
       countryTag = ` ${flag ? flag + ' ' : ''}[${code} • ${lang}]`;

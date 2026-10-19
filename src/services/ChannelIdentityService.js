@@ -171,10 +171,16 @@ class ChannelIdentityService {
     }
 
     // 4. Detect Country and Language
+    // Explicit group or country metadata from provider is authoritative ground truth
+    const groupCountryInfo = (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()))
+      ? ChannelCountryService.detectChannelCountry(meta.group.trim())
+      : (meta.country ? ChannelCountryService.detectChannelCountry(meta.country) : null);
     const detectedCountryInfo = ChannelCountryService.detectChannelCountry(raw);
-    let country = meta.country || (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()) ? meta.group.trim() : null) || (detectedCountryInfo ? detectedCountryInfo.country : null);
-    let countryCode = (detectedCountryInfo && detectedCountryInfo.name) || (country && COUNTRY_LANG_MAP[country] ? country.slice(0, 2).toUpperCase() : null);
-    let countryFlag = (detectedCountryInfo && detectedCountryInfo.flag) || null;
+    const primaryCountryInfo = groupCountryInfo || detectedCountryInfo;
+
+    let country = meta.country || (groupCountryInfo ? groupCountryInfo.country : (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()) ? meta.group.trim() : null)) || (detectedCountryInfo ? detectedCountryInfo.country : null);
+    let countryCode = (groupCountryInfo && groupCountryInfo.name) || (detectedCountryInfo && detectedCountryInfo.name) || (country && COUNTRY_LANG_MAP[country] ? country.slice(0, 2).toUpperCase() : null);
+    let countryFlag = (groupCountryInfo && groupCountryInfo.flag) || (detectedCountryInfo && detectedCountryInfo.flag) || null;
 
     let language = 'English';
     if (meta.language && typeof meta.language === 'string') {
@@ -194,8 +200,8 @@ class ChannelIdentityService {
       else if (/\bhindi\b/i.test(rawLower)) language = 'Hindi';
       else if (/\brussian\b/i.test(rawLower)) language = 'Russian';
       else if (/\bdutch\b/i.test(rawLower)) language = 'Dutch';
-      else if (detectedCountryInfo && detectedCountryInfo.language) {
-        language = detectedCountryInfo.language;
+      else if (primaryCountryInfo && primaryCountryInfo.language) {
+        language = primaryCountryInfo.language;
       } else if (country && COUNTRY_LANG_MAP[country]) {
         language = COUNTRY_LANG_MAP[country];
       }

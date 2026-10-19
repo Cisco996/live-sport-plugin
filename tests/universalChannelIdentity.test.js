@@ -130,6 +130,29 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       expect(ch1.identityKey).toBe('astrocricket1');
       expect(ch2.identityKey).toBe('astrocricket2');
     });
+
+    test('accurately preserves country metadata for regional Vavoo feeds under unified brand', () => {
+      const itRes = ChannelIdentityService.parseChannel('SKY SPORT TENNIS', { group: 'Italy', language: 'it' });
+      expect(itRes.canonicalTitle).toBe('Sky Sports Tennis');
+      expect(itRes.country).toBe('Italy');
+      expect(itRes.countryCode).toBe('IT');
+      expect(itRes.countryFlag).toBe('🇮🇹');
+      expect(itRes.language).toBe('Italian');
+
+      const ukRes = ChannelIdentityService.parseChannel('SKY SPORTS TENNIS', { group: 'United Kingdom', language: 'en' });
+      expect(ukRes.canonicalTitle).toBe('Sky Sports Tennis');
+      expect(ukRes.country).toBe('United Kingdom');
+      expect(ukRes.countryCode).toBe('UK');
+      expect(ukRes.countryFlag).toBe('🇬🇧');
+      expect(ukRes.language).toBe('English');
+
+      const deRes = ChannelIdentityService.parseChannel('SKY SPORT TENNIS', { group: 'Germany', language: 'de' });
+      expect(deRes.canonicalTitle).toBe('Sky Sports Tennis');
+      expect(deRes.country).toBe('Germany');
+      expect(deRes.countryCode).toBe('DE');
+      expect(deRes.countryFlag).toBe('🇩🇪');
+      expect(deRes.language).toBe('German');
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
