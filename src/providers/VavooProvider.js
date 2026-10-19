@@ -209,8 +209,16 @@ const globalTokenManager = new VavooTokenManager();
 let _vavooCatalog = null;
 function getVavooCatalog() {
   if (!_vavooCatalog) {
-    const catalogPath = path.resolve(__dirname, '../data/vavoo_channels.json');
-    if (fs.existsSync(catalogPath)) {
+    const candidates = [
+      path.resolve(__dirname, '../data/vavoo_channels.json'),
+      path.resolve(__dirname, './data/vavoo_channels.json'),
+      path.resolve(__dirname, './src/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'src/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'dist/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'data/vavoo_channels.json'),
+    ];
+    const catalogPath = candidates.find(p => fs.existsSync(p));
+    if (catalogPath) {
       try {
         _vavooCatalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
       } catch (err) {

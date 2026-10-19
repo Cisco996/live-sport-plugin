@@ -36,7 +36,16 @@ class BroadcasterMatchService {
         customPath = opts.catalogPath;
       }
     } catch (_) {}
-    this._catalogPath = customPath || path.resolve(__dirname, '../data/vavoo_channels.json');
+    const candidates = [
+      customPath,
+      path.resolve(__dirname, '../data/vavoo_channels.json'),
+      path.resolve(__dirname, './data/vavoo_channels.json'),
+      path.resolve(__dirname, './src/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'src/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'dist/data/vavoo_channels.json'),
+      path.resolve(process.cwd(), 'data/vavoo_channels.json')
+    ].filter(Boolean);
+    this._catalogPath = candidates.find(p => fs.existsSync(p)) || candidates[0];
     this._channelIndex = new Map();
     this._aliasIndex = new Map();
     this._initialized = false;
