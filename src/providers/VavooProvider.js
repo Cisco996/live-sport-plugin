@@ -526,8 +526,12 @@ class VavooProvider extends BaseProvider {
 
       const is4K = src.is4k || /4k|uhd/i.test(matchTitle);
       const resolution = is4K ? '4K UHD' : '1080p';
-      const channelName = src.channelName || (matchTitle && !matchTitle.startsWith('vavoo_') ? matchTitle : 'Live TV');
-      const channelLabel = src.group ? `${channelName} — ${src.group}` : channelName;
+      const rawChannelName = src.channelName || (matchTitle && !matchTitle.startsWith('vavoo_') ? matchTitle : 'Live TV');
+      const channelLabel = rawChannelName
+        .replace(/\s*[-–—]{1,3}\s*(?:Poland|Germany|UK|USA?|France|Spain|Italy|Portugal|Turkey|Netherlands|Canada|Australia|Austria|Switzerland|India|Argentina|Chile|Brazil|[A-Za-z]{2,})\s*$/i, '')
+        .replace(/\s*[-–—]{2,}\s*/g, ' ')
+        .replace(/\s*[–—]\s*/g, ' ')
+        .trim() || rawChannelName;
 
       return [new StreamEntity({
         name: 'Vavoo',
@@ -537,6 +541,10 @@ class VavooProvider extends BaseProvider {
         score: is4K ? 95 : 85,
         language: src.language || undefined,
         channelName: channelLabel,
+        canonicalChannel: src.canonicalChannel || channelLabel,
+        country: src.country,
+        countryCode: src.countryCode,
+        countryFlag: src.countryFlag,
         group: src.group,
         is4k: is4K,
         behaviorHints: {

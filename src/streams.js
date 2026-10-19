@@ -1233,7 +1233,9 @@ async function handleStream(type, id, config) {
     }
     
     const isChannelCard = Boolean(match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_')));
-    if (!channelName && isChannelCard) {
+    if (isChannelCard && s.canonicalChannel) {
+      channelName = s.canonicalChannel;
+    } else if (!channelName && isChannelCard) {
       channelName = s.canonicalChannel || s.channelName || (match && match.title) || '';
     }
 
@@ -1241,6 +1243,9 @@ async function handleStream(type, id, config) {
     if (channelName) {
       channelName = channelName.trim();
       countryInfo = detectChannelCountry(channelName);
+    }
+    if (!countryInfo && s.group) {
+      countryInfo = detectChannelCountry(s.group);
     }
     if (!countryInfo) {
       const fallbackChannel = s.canonicalChannel || s.channelName || (match && match.title) || '';
@@ -1252,6 +1257,14 @@ async function handleStream(type, id, config) {
     if (countryInfo) {
       if (!s.language) s.language = countryInfo.language;
       if (!s.country) s.country = countryInfo.name;
+    }
+
+    if (channelName) {
+      channelName = channelName
+        .replace(/\s*[-–—]{1,3}\s*(?:Poland|Germany|UK|USA?|France|Spain|Italy|Portugal|Turkey|Netherlands|Canada|Australia|Austria|Switzerland|India|Argentina|Chile|Brazil|[A-Za-z]{2,})\s*$/i, '')
+        .replace(/\s*[-–—]{2,}\s*/g, ' ')
+        .replace(/\s*[–—]\s*/g, ' ')
+        .trim();
     }
 
     const flag = (countryInfo && countryInfo.flag) || s.countryFlag || '';
@@ -1457,7 +1470,12 @@ function formatChannelStreamTitle(s, match, providerNameOverride, countryInfo, q
   else if (srcKey === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
 
   const origTitle = originalTitleOverride !== undefined ? originalTitleOverride : (s.title || '');
-  const displayChName = s.canonicalChannel || s.channelName || (match && match.title) || channelNameOverride || 'Live Channel';
+  let displayChName = s.canonicalChannel || s.channelName || (match && match.title) || channelNameOverride || 'Live Channel';
+  displayChName = displayChName
+    .replace(/\s*[-–—]{1,3}\s*(?:Poland|Germany|UK|USA?|France|Spain|Italy|Portugal|Turkey|Netherlands|Canada|Australia|Austria|Switzerland|India|Argentina|Chile|Brazil|[A-Za-z]{2,})\s*$/i, '')
+    .replace(/\s*[-–—]{2,}\s*/g, ' ')
+    .replace(/\s*[–—]\s*/g, ' ')
+    .trim() || displayChName;
   const displayCountry = s.country || s.countryName || (countryInfo && (countryInfo.country || countryInfo.name)) || (s.countryCode ? s.countryCode : '');
   const displayFlag = s.countryFlag || (countryInfo && countryInfo.flag) || '';
   const displayCountryPart = displayCountry ? ` — ${displayCountry}${displayFlag ? ' ' + displayFlag : ''}` : '';
