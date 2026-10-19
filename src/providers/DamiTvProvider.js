@@ -1,6 +1,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
 const { BASE_URL } = require('../config');
 
 // Rolling-window channels (NFL Network, Sky Sports Golf, ...) republish a
@@ -141,9 +142,26 @@ class DamiTvProvider extends BaseProvider {
             if (seenSanitizedIds.has(sanitized)) return;
             seenSanitizedIds.add(sanitized);
 
-            matches.push(new MatchEntity({
+            const ident = ChannelIdentityService.parseChannel(s.name, { group: s.league });
+            const canonicalTitle = ident.canonicalTitle;
+            const enrichedSources = sources.map(src => ({
+              ...src,
+              channelName: s.name,
+              canonicalChannel: canonicalTitle,
+              country: ident.country || '',
+              countryCode: ident.countryCode || '',
+              countryFlag: ident.countryFlag || '',
+              language: ident.language || '',
+              resolution: ident.resolution || '',
+              isBackup: ident.isBackup || false,
+              isTimeshift: ident.isTimeshift || false,
+              type: 'channel'
+            }));
+
+            const entity = new MatchEntity({
               id: `dami_${sanitized}`,
-              title: s.name,
+              title: canonicalTitle,
+              baseTitle: canonicalTitle,
               category: 'networks',
               date: '0',
               popular: '1',
@@ -151,8 +169,12 @@ class DamiTvProvider extends BaseProvider {
               league: 'Live TV',
               thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
               poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
-              sources: sources
-            }));
+              sources: enrichedSources
+            });
+            entity.channelIdentityKey = ident.identityKey;
+            entity.channelNumber = ident.channelNumber;
+            entity.canonicalTitle = canonicalTitle;
+            matches.push(entity);
             return;
           }
 
@@ -231,19 +253,40 @@ class DamiTvProvider extends BaseProvider {
           }
 
           seenSanitizedIds.add(this._sanitizeId(item.id));
-          matches.push(new MatchEntity({
+          const ident = ChannelIdentityService.parseChannel(item.title);
+          const canonicalTitle = ident.canonicalTitle;
+          const enrichedSources = sources.map(src => ({
+            ...src,
+            channelName: item.title,
+            canonicalChannel: canonicalTitle,
+            country: ident.country || '',
+            countryCode: ident.countryCode || '',
+            countryFlag: ident.countryFlag || '',
+            language: ident.language || '',
+            resolution: ident.resolution || '',
+            isBackup: ident.isBackup || false,
+            isTimeshift: ident.isTimeshift || false,
+            type: 'channel'
+          }));
+
+          const entity = new MatchEntity({
             id: `dami_${this._sanitizeId(item.id)}`,
             title: item.title,
+            baseTitle: item.title,
             category: 'networks',
-            date: '0',
+            date: '',
             popular: '1',
             status: '',
             league: 'Live TV',
             thumbnail_url: '',
             poster: '',
             logo: '',
-            sources: sources
-          }));
+            sources: enrichedSources
+          });
+          entity.channelIdentityKey = ident.identityKey;
+          entity.channelNumber = ident.channelNumber;
+          entity.canonicalTitle = canonicalTitle;
+          matches.push(entity);
         }
       }
     } catch (error) {

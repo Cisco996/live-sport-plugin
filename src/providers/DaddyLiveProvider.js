@@ -5,6 +5,7 @@ const { parseTimezone } = require('../timezone');
 const { extract: extractChain } = require('../services/EmbedExtractorChain');
 const { getChannelLogo } = require('../services/ChannelLogoService');
 const ChannelCountryService = require('../services/ChannelCountryService');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
 const { BASE_URL } = require('../config');
 const cheerio = require('cheerio');
 const os = require('os');
@@ -807,13 +808,17 @@ class DaddyLiveProvider extends BaseProvider {
           if (rawName.startsWith('18+') || rawName.includes('18+')) continue;
           seen247.add(chId);
 
-          const slug = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-          const logoUrl = getChannelLogo(rawName);
+          const ident = ChannelIdentityService.parseChannel(rawName);
+          const canonicalTitle = ident.canonicalTitle;
+          const identityKey = ident.identityKey;
+          const channelNumber = ident.channelNumber;
+          const slug = canonicalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          const logoUrl = getChannelLogo(canonicalTitle) || getChannelLogo(rawName);
 
-          matches.push(new MatchEntity({
+          const entity = new MatchEntity({
             id: `dlv_ch_${chId}_${slug}`,
-            title: rawName,
-            baseTitle: rawName,
+            title: canonicalTitle,
+            baseTitle: canonicalTitle,
             category: 'networks',
             date: '0',
             popular: '1',
@@ -823,9 +828,22 @@ class DaddyLiveProvider extends BaseProvider {
             sources: [{
               source: 'daddylive',
               id: chId,
-              channelName: rawName
+              channelName: rawName,
+              canonicalChannel: canonicalTitle,
+              country: ident.country || '',
+              countryCode: ident.countryCode || '',
+              countryFlag: ident.countryFlag || '',
+              language: ident.language || '',
+              resolution: ident.resolution || '',
+              isBackup: ident.isBackup || false,
+              isTimeshift: ident.isTimeshift || false,
+              type: 'channel'
             }]
-          }));
+          });
+          entity.channelIdentityKey = identityKey;
+          entity.channelNumber = channelNumber;
+          entity.canonicalTitle = canonicalTitle;
+          matches.push(entity);
         }
       }
     } catch (err) {

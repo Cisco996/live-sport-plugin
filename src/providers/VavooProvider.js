@@ -3,6 +3,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -232,6 +233,52 @@ function getVavooCatalog() {
   return _vavooCatalog;
 }
 
+// A single Cartoon Network card is more useful than a long list of the same
+// network split by country, language, resolution, and backup feed.  Keep the
+// individual catalog rows as sources so selecting the card still offers every
+// regional Vavoo feed.
+function getVavooChannelKey(channel) {
+  const name = String(channel && channel.name || '')
+    .toLowerCase()
+    .replace(/\b(?:4k|uhd|fhd|full\s*hd|hd|sd)\b/g, ' ')
+    .replace(/\(\s*backup\s*\d*\s*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Vavoo labels the Arabic feed "CARTOON NETWORK ARABIC" while the other
+  // regional feeds use simply "CARTOON NETWORK". They belong on the same card.
+  if (/^(?:tr )?cartoon network(?: arabic)?$/.test(name)) {
+    return 'cartoon-network';
+  }
+  return null;
+}
+
+function toVavooChannelSource(channel) {
+  const ident = ChannelIdentityService.parseChannel(channel.name, {
+    group: channel.group,
+    language: channel.language,
+    is4k: channel.is4k
+  });
+
+  return {
+    source: 'vavoo',
+    id: channel.vavooUrl,
+    channelName: channel.name,
+    canonicalChannel: ident.canonicalTitle,
+    language: ident.language,
+    country: ident.country || channel.group,
+    countryCode: ident.countryCode,
+    countryFlag: ident.countryFlag,
+    resolution: ident.resolution,
+    group: channel.group,
+    is4k: channel.is4k,
+    isBackup: ident.isBackup,
+    isTimeshift: ident.isTimeshift,
+    type: 'channel'
+  };
+}
+
 // ─── VavooProvider Class ────────────────────────────────────────────────────
 class VavooProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -265,9 +312,32 @@ class VavooProvider extends BaseProvider {
       return [];
     }
 
-    return catalog.map(ch => {
+    const collapsedChannels = new Map();
+    for (const ch of catalog) {
+      const key = getVavooChannelKey(ch);
+      if (!key) continue;
+      const group = collapsedChannels.get(key) || [];
+      group.push(ch);
+      collapsedChannels.set(key, group);
+    }
+
+    const standaloneChannels = catalog.filter(ch => !getVavooChannelKey(ch));
+    const channelRows = [
+      ...standaloneChannels.map(ch => ({ channel: ch, sources: [ch] })),
+      ...Array.from(collapsedChannels.entries()).map(([key, sources]) => ({
+        channel: {
+          ...sources[0],
+          id: key,
+          name: key === 'cartoon-network' ? 'CARTOON NETWORK' : sources[0].name,
+          group: 'Multi-region'
+        },
+        sources
+      }))
+    ];
+
+    return channelRows.map(({ channel: ch, sources }) => {
       const isPopular = ch.is4k || (ch.group === 'United Kingdom' && /sky sport|tnt sport/i.test(ch.name));
-      const hasGroup = ch.group && typeof ch.group === 'string' && !/^(?:live tv|general|channels|networks|other)$/i.test(ch.group.trim());
+      const hasGroup = ch.group && typeof ch.group === 'string' && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(ch.group.trim());
       const groupLower = hasGroup ? ch.group.toLowerCase().trim() : '';
       const nameLower = ch.name.toLowerCase();
       const groupInName = hasGroup && (
@@ -281,7 +351,13 @@ class VavooProvider extends BaseProvider {
         (groupLower === 'turkey' && /\b(?:tr)\b/i.test(nameLower))
       );
       const displayTitle = (hasGroup && !groupInName) ? `${ch.name} (${ch.group})` : ch.name;
-      return new MatchEntity({
+      const ident = ChannelIdentityService.parseChannel(ch.name, {
+        group: ch.group,
+        language: ch.language,
+        is4k: ch.is4k
+      });
+
+      const entity = new MatchEntity({
         id: `vavoo_ch_${ch.id}`,
         title: displayTitle,
         baseTitle: displayTitle,
@@ -291,16 +367,12 @@ class VavooProvider extends BaseProvider {
         league: ch.group || 'Live TV',
         logo: undefined,
         thumbnail_url: undefined,
-        sources: [{
-          source: 'vavoo',
-          id: ch.vavooUrl,
-          channelName: ch.name,
-          language: ch.language || undefined,
-          group: ch.group,
-          is4k: ch.is4k,
-          type: 'channel'
-        }]
+        sources: sources.map(toVavooChannelSource)
       });
+      entity.channelIdentityKey = ident.identityKey;
+      entity.channelNumber = ident.channelNumber;
+      entity.canonicalTitle = ident.canonicalTitle;
+      return entity;
     });
   }
 
@@ -364,7 +436,8 @@ class VavooProvider extends BaseProvider {
 
       const is4K = src.is4k || /4k|uhd/i.test(matchTitle);
       const resolution = is4K ? '4K UHD' : '1080p';
-      const channelLabel = src.channelName || (matchTitle && !matchTitle.startsWith('vavoo_') ? matchTitle : 'Live TV');
+      const channelName = src.channelName || (matchTitle && !matchTitle.startsWith('vavoo_') ? matchTitle : 'Live TV');
+      const channelLabel = src.group ? `${channelName} — ${src.group}` : channelName;
 
       return [new StreamEntity({
         name: 'Vavoo',

@@ -21,8 +21,8 @@ describe('Vavoo 24/7 Channel Isolation & Stream Verification', () => {
     jest.clearAllMocks();
   });
 
-  describe('Channel Identity & Regional Isolation in MatchAggregator', () => {
-    test('does not merge Cartoon Network channels across different countries', () => {
+  describe('Channel Identity & Universal Aggregation in MatchAggregator', () => {
+    test('merges Cartoon Network channels across different countries into one universal card', () => {
       const franceChannel = new MatchEntity({
         id: 'vavoo_ch_france_cn',
         title: 'CARTOON NETWORK (France)',
@@ -41,10 +41,10 @@ describe('Vavoo 24/7 Channel Isolation & Stream Verification', () => {
         sources: [{ source: 'vavoo', group: 'Germany', type: 'channel' }]
       });
 
-      expect(aggregator.isSameEvent(franceChannel, germanyChannel)).toBe(false);
+      expect(aggregator.isSameEvent(franceChannel, germanyChannel)).toBe(true);
     });
 
-    test('prevents token subset collapsing between 24/7 channels (e.g. Cartoon Network vs Cartoon Network Arabic)', () => {
+    test('merges language variants into the same universal card (e.g. Cartoon Network and Cartoon Network Arabic)', () => {
       const baseChannel = new MatchEntity({
         id: 'dlv_ch_339_cartoon-network',
         title: 'Cartoon Network',
@@ -63,10 +63,10 @@ describe('Vavoo 24/7 Channel Isolation & Stream Verification', () => {
         sources: [{ source: 'vavoo', group: 'Arabia', type: 'channel' }]
       });
 
-      expect(aggregator.isSameEvent(baseChannel, arabicChannel)).toBe(false);
+      expect(aggregator.isSameEvent(baseChannel, arabicChannel)).toBe(true);
     });
 
-    test('merges matching 24/7 channels when same region and same identity', () => {
+    test('merges cross-provider matching 24/7 channels into one card', () => {
       const dlvFrance = new MatchEntity({
         id: 'dlv_ch_cn_fr',
         title: 'Cartoon Network',
@@ -88,26 +88,44 @@ describe('Vavoo 24/7 Channel Isolation & Stream Verification', () => {
       expect(aggregator.isSameEvent(dlvFrance, vavooFrance)).toBe(true);
     });
 
-    test('does not merge channels with conflicting specific regions even if normalized names match', () => {
-      const ch1 = new MatchEntity({
-        id: 'dlv_ch_1',
+    test('strictly preserves channel numbers as separate cards (e.g. Astro Cricket 1 vs Astro Cricket 2)', () => {
+      const astro1 = new MatchEntity({
+        id: 'vavoo_ch_astro1',
+        title: 'Astro Cricket 1',
+        category: 'networks',
+        date: '0',
+        sources: [{ source: 'vavoo', type: 'channel' }]
+      });
+
+      const astro2 = new MatchEntity({
+        id: 'vavoo_ch_astro2',
+        title: 'Astro Cricket 2',
+        category: 'networks',
+        date: '0',
+        sources: [{ source: 'vavoo', type: 'channel' }]
+      });
+
+      expect(aggregator.isSameEvent(astro1, astro2)).toBe(false);
+    });
+
+    test('prevents false merges between distinct networks (e.g. Cartoon Network vs Cartoonito)', () => {
+      const cn = new MatchEntity({
+        id: 'dlv_ch_cn',
         title: 'Cartoon Network',
         category: 'networks',
         date: '0',
-        league: 'France',
-        sources: [{ source: 'daddylive', country: 'France', type: 'channel' }]
+        sources: [{ source: 'daddylive', type: 'channel' }]
       });
 
-      const ch2 = new MatchEntity({
-        id: 'dlv_ch_2',
-        title: 'Cartoon Network',
+      const cartoonito = new MatchEntity({
+        id: 'vavoo_ch_cartoonito',
+        title: 'Cartoonito',
         category: 'networks',
         date: '0',
-        league: 'Germany',
-        sources: [{ source: 'vavoo', group: 'Germany', type: 'channel' }]
+        sources: [{ source: 'vavoo', type: 'channel' }]
       });
 
-      expect(aggregator.isSameEvent(ch1, ch2)).toBe(false);
+      expect(aggregator.isSameEvent(cn, cartoonito)).toBe(false);
     });
   });
 

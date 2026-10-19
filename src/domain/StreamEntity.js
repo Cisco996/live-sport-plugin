@@ -1,27 +1,63 @@
 class StreamEntity {
-  constructor({ name, title, url, externalUrl, resolution, bitrate, score, behaviorHints, clearkey, language }) {
-    this.name = name || 'Unknown Proxy';
-    this.title = title || 'Unknown Stream';
+  constructor(data = {}) {
+    this.name = data.name || 'Unknown Proxy';
+    this.title = data.title || 'Unknown Stream';
     
-    if (url) {
-      this.url = url;
+    if (data.url) {
+      this.url = data.url;
     }
-    if (externalUrl) {
-      this.externalUrl = externalUrl;
+    if (data.externalUrl) {
+      this.externalUrl = data.externalUrl;
     }
 
-    this.resolution = resolution || null;
-    this.bitrate = bitrate || null;
-    this.score = score || 0;
+    this.resolution = data.resolution || null;
+    this.bitrate = data.bitrate || null;
+    this.score = data.score || 0;
     
-    if (behaviorHints) {
-      this.behaviorHints = behaviorHints;
+    if (data.behaviorHints) {
+      this.behaviorHints = data.behaviorHints;
     }
-    if (clearkey) {
-      this.clearkey = clearkey;
+    if (data.clearkey) {
+      this.clearkey = data.clearkey;
     }
-    if (language) {
-      this.language = language;
+    if (data.language) {
+      this.language = data.language;
+    }
+    if (data.quality) {
+      this.quality = data.quality;
+    }
+    if (data.country) {
+      this.country = data.country;
+    }
+    if (data.countryCode) {
+      this.countryCode = data.countryCode;
+    }
+    if (data.countryFlag) {
+      this.countryFlag = data.countryFlag;
+    }
+    if (data.canonicalChannel) {
+      this.canonicalChannel = data.canonicalChannel;
+    }
+    if (data.channelName) {
+      this.channelName = data.channelName;
+    }
+    if (data.sourceName) {
+      this.sourceName = data.sourceName;
+    }
+    if (data._source) {
+      this._source = data._source;
+    }
+    if (data.isBackup !== undefined) {
+      this.isBackup = data.isBackup;
+    }
+    if (data.isTimeshift !== undefined) {
+      this.isTimeshift = data.isTimeshift;
+    }
+    if (data.speedScore !== undefined) {
+      this.speedScore = data.speedScore;
+    }
+    if (data.isTikTok !== undefined) {
+      this.isTikTok = data.isTikTok;
     }
   }
 }

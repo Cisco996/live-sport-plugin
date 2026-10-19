@@ -11,6 +11,8 @@ const STOP_WORDS = new Set([
 ]);
 
 const { parseTimezone } = require('../timezone');
+const ChannelIdentityService = require('./ChannelIdentityService');
+const MatchEntity = require('../domain/MatchEntity');
 
 /**
  * Parses a provider-supplied match date into epoch milliseconds.
@@ -522,6 +524,21 @@ class MatchAggregator {
       status: e && e.status ? String(e.status) : '',
       isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'),
       isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'),
+      channelIdentityKey: (e && e.channelIdentityKey) ? e.channelIdentityKey : (
+        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
+          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).identityKey
+          : null
+      ),
+      channelNumber: (e && e.channelNumber !== undefined && e.channelNumber !== null) ? e.channelNumber : (
+        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
+          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).channelNumber
+          : null
+      ),
+      canonicalTitle: (e && e.canonicalTitle) ? e.canonicalTitle : (
+        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
+          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).canonicalTitle
+          : null
+      ),
       league: e && e.league ? String(e.league).toLowerCase().trim() : '',
       group: (e && e.sources && e.sources[0] && (e.sources[0].group || e.sources[0].country))
         ? String(e.sources[0].group || e.sources[0].country).toLowerCase().trim()
@@ -557,9 +574,8 @@ class MatchAggregator {
       return false;
     }
 
-    // 0b. SKTech continuous 24/7 TV channels must NEVER merge with scheduled fixtures (and vice versa)
-    const isSktechChannel = (p1.id && p1.id.startsWith('sktech_ch_')) || (p2.id && p2.id.startsWith('sktech_ch_'));
-    if (isSktechChannel && (p1.isChannel !== p2.isChannel)) {
+    // 0b. Continuous 24/7 TV channels must NEVER merge with scheduled fixtures (and vice versa)
+    if (Boolean(p1.isChannel) !== Boolean(p2.isChannel)) {
       return false;
     }
 
@@ -638,17 +654,19 @@ class MatchAggregator {
       return true;
     }
 
-    // 6b. Both channel-like: strict identity only. Distinct channels with shared
-    //     branding must never merge.
+    // 6b. Both channel-like: Universal Channel Identity.
+    // Preserves channel numbers (e.g. Astro Cricket 1 vs 2 remain separate).
+    // Aggregates regional, language, quality, and backup variants into one card.
     if (p1.isChannel && p2.isChannel) {
+      // 1. Strict channel number protection: different numbers NEVER merge!
+      if (p1.channelNumber !== p2.channelNumber) return false;
+
+      // 2. Universal Channel Identity Key match
+      if (p1.channelIdentityKey && p2.channelIdentityKey) {
+        return p1.channelIdentityKey === p2.channelIdentityKey;
+      }
+
       if (p1.norm !== p2.norm) return false;
-      const g1 = _normalizeCountry(p1.group || p1.league || '');
-      const g2 = _normalizeCountry(p2.group || p2.league || '');
-      const genericGroups = new Set(['live tv', 'general', 'channels', 'networks', 'other', '']);
-      const isG1Generic = genericGroups.has(g1);
-      const isG2Generic = genericGroups.has(g2);
-      if (isG1Generic !== isG2Generic) return false;
-      if (!isG1Generic && !isG2Generic && g1 !== g2) return false;
       return true;
     }
     if (p1.norm === p2.norm) return true;
@@ -688,6 +706,64 @@ class MatchAggregator {
   /** Public API preserved: decision on raw matches (computes pre on the fly). */
   isSameEvent(e1, e2) {
     return this._sameEventPre(this._precompute(e1), this._precompute(e2));
+  }
+
+  /**
+   * Merges two matching MatchEntity instances into one unified meta card.
+   * Unifies sources, preserves canonical title, and ensures correct category.
+   *
+   * @param {MatchEntity} primary
+   * @param {MatchEntity} secondary
+   * @returns {MatchEntity}
+   */
+  mergeMatches(primary, secondary) {
+    if (!primary) return secondary;
+    if (!secondary) return primary;
+
+    const p1 = this._precompute(primary);
+    const p2 = this._precompute(secondary);
+
+    const merged = new MatchEntity({
+      ...primary,
+      sources: [...(primary.sources || [])]
+    });
+
+    const getSourceKey = (s) => [
+      s.source || '',
+      s.id || '',
+      s.streamSource || '',
+      s.streamId || '',
+      s.url || '',
+      s.group || '',
+      s.channelName || '',
+      s.name || ''
+    ].join('|');
+
+    const existingSourceKeys = new Set(
+      (merged.sources || []).map(getSourceKey)
+    );
+
+    if (Array.isArray(secondary.sources)) {
+      for (const src of secondary.sources) {
+        const key = getSourceKey(src);
+        if (!existingSourceKeys.has(key)) {
+          existingSourceKeys.add(key);
+          merged.sources.push(src);
+        }
+      }
+    }
+
+    if (p1.isChannel || p2.isChannel) {
+      merged.category = 'networks';
+      const canonical = p1.canonicalTitle || p2.canonicalTitle || primary.canonicalTitle || secondary.canonicalTitle || primary.title;
+      merged.title = canonical;
+      merged.baseTitle = canonical;
+      merged.canonicalTitle = canonical;
+      merged.channelIdentityKey = p1.channelIdentityKey || p2.channelIdentityKey;
+      merged.channelNumber = p1.channelNumber || p2.channelNumber;
+    }
+
+    return merged;
   }
 
   async _fetchProviderMatches(provider) {
@@ -773,10 +849,11 @@ class MatchAggregator {
 
         // 2. Fast O(1) Channel Lookup
         // For continuous 24/7 network channels (no dual teams), channel identity
-        // requires strict normalized title match (pre.norm). Lookup directly in O(1).
-        if (idx === -1 && pre.isChannel && !pre.teams && pre.norm) {
-          if (channelNormIndex.has(pre.norm)) {
-            const candidateIdx = channelNormIndex.get(pre.norm);
+        // requires strict normalized title match or universal channel identity key. Lookup directly in O(1).
+        if (idx === -1 && pre.isChannel && !pre.teams) {
+          const chKey = pre.channelIdentityKey || pre.norm;
+          if (chKey && channelNormIndex.has(chKey)) {
+            const candidateIdx = channelNormIndex.get(chKey);
             if (this._sameEventPre(finalPres[candidateIdx], pre)) {
               idx = candidateIdx;
             }
@@ -876,8 +953,11 @@ class MatchAggregator {
           }
 
           // Register in O(1) Channel Index
-          if (pre.isChannel && !pre.teams && pre.norm) {
-            channelNormIndex.set(pre.norm, newIdx);
+          if (pre.isChannel && !pre.teams) {
+            const chKey = pre.channelIdentityKey || pre.norm;
+            if (chKey) {
+              channelNormIndex.set(chKey, newIdx);
+            }
           }
 
           // Register in Multi-Token Inverted Index
@@ -921,7 +1001,10 @@ class MatchAggregator {
               s.id === src.id &&
               s.source === src.source &&
               (s.streamSource || '') === (src.streamSource || '') &&
-              (s.streamId || '') === (src.streamId || '')
+              (s.streamId || '') === (src.streamId || '') &&
+              (s.group || '') === (src.group || '') &&
+              (s.channelName || '') === (src.channelName || '') &&
+              (s.name || '') === (src.name || '')
             )) {
               existing.sources.push(src);
             }
@@ -975,6 +1058,15 @@ class MatchAggregator {
           existing.title = match.title;
           existing._titleIsFixture = true;
           finalPres[idx] = pre;
+        } else if (pre.isChannel && finalPres[idx].isChannel) {
+          existing.category = 'networks';
+          if (pre.canonicalTitle && (!existing._canonicalTitleSet || existing.title.includes('('))) {
+            existing.title = pre.canonicalTitle;
+            existing.baseTitle = pre.canonicalTitle;
+            existing._canonicalTitleSet = true;
+          }
+          if (pre.channelIdentityKey) existing.channelIdentityKey = pre.channelIdentityKey;
+          if (pre.channelNumber) existing.channelNumber = pre.channelNumber;
         }
         }
         if (end < providerMatches.length) await yieldToLoop();

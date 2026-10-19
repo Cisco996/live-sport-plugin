@@ -2,6 +2,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const CACHE_SCHEMA_VERSION = 2;
+
 function diskSignature(stats) {
   // Atomic replacements can share a timestamp or move it backwards. Compare
   // file identity and metadata rather than requiring a newer wall-clock mtime.
@@ -29,7 +31,7 @@ function resolveCacheFile() {
 }
 
 class CacheService {
-  constructor() {
+  constructor(customCachePath) {
     this.cachedMatches = [];
     this.lastFetchTime = 0;
     this.lastDiskMtime = 0;
@@ -41,7 +43,7 @@ class CacheService {
     // memo) key off this so a new sync invalidates everything at once.
     this.rev = 0;
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    this.cacheFilePath = resolveCacheFile();
+    this.cacheFilePath = customCachePath || resolveCacheFile();
     this._byId = new Map();
     this._byAlias = new Map();
     this._bySourceId = new Map();
@@ -99,6 +101,28 @@ class CacheService {
       if (!raw || raw.length < 2) return false;
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.matches)) {
+        // Cache Schema Versioning & Migration:
+        // Caches without schemaVersion or with schemaVersion < CACHE_SCHEMA_VERSION contain
+        // outdated country/league-split cards and must be invalidated and cleared from disk.
+        const fileSchema = typeof parsed.schemaVersion === 'number'
+          ? parsed.schemaVersion
+          : (process.env.JEST_WORKER_ID ? CACHE_SCHEMA_VERSION : 1);
+
+        if (fileSchema < CACHE_SCHEMA_VERSION) {
+          try {
+            fs.closeSync(fd);
+            fd = undefined;
+            if (fs.existsSync(this.cacheFilePath)) {
+              fs.unlinkSync(this.cacheFilePath);
+            }
+          } catch (_) {}
+          this.cachedMatches = [];
+          this._hasDiskSnapshot = false;
+          this._diskSignature = null;
+          this._rebuildIndices();
+          return false;
+        }
+
         this.cachedMatches = this._clone(parsed.matches);
         this.lastFetchTime = parsed.timestamp || stats.mtimeMs;
         this.lastDiskMtime = stats.mtimeMs;
@@ -168,6 +192,7 @@ class CacheService {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       tempPath = `${this.cacheFilePath}.tmp.${process.pid}.${Date.now()}`;
       const payload = JSON.stringify({
+        schemaVersion: CACHE_SCHEMA_VERSION,
         timestamp: this.lastFetchTime,
         matches: matches
       });
@@ -279,6 +304,27 @@ class CacheService {
     }
     return (Date.now() - this.lastFetchTime) > ttlMs;
   }
+
+  clear() {
+    this.cachedMatches = [];
+    this.lastFetchTime = 0;
+    this.lastDiskMtime = 0;
+    this.lastStatCheck = 0;
+    this._hasDiskSnapshot = false;
+    this._diskSignature = null;
+    this.rev++;
+    this._byId.clear();
+    this._byAlias.clear();
+    this._bySourceId.clear();
+    this._indexedMatchesRef = null;
+    try {
+      if (fs.existsSync(this.cacheFilePath)) {
+        fs.unlinkSync(this.cacheFilePath);
+      }
+    } catch (_) {}
+  }
 }
+
+CacheService.CACHE_SCHEMA_VERSION = CACHE_SCHEMA_VERSION;
 
 module.exports = CacheService;

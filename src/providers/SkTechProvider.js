@@ -3,6 +3,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
 const { matchResolver, channelResolver, crypto: skCrypto } = require('../resolver/sktech');
 
 /**
@@ -72,10 +73,18 @@ class SkTechProvider extends BaseProvider {
     try {
       const channels = await this.channelResolver.fetchChannels();
       for (const ch of channels) {
-        matches.push(new MatchEntity({
+        const ident = ChannelIdentityService.parseChannel(ch.title, {
+          group: ch.group,
+          logo: ch.logo
+        });
+        const canonicalTitle = ident.canonicalTitle;
+        const identityKey = ident.identityKey;
+        const channelNumber = ident.channelNumber;
+
+        const entity = new MatchEntity({
           id: `sktech_ch_${ch.id}`,
-          title: ch.title,
-          baseTitle: ch.title,
+          title: canonicalTitle,
+          baseTitle: canonicalTitle,
           category: 'networks',
           date: '0',
           popular: '1',
@@ -87,7 +96,15 @@ class SkTechProvider extends BaseProvider {
             source: 'sktech',
             id: ch.url || ch.links || ch.api || ch.id,
             channelName: ch.title,
-            type: ch.type,
+            canonicalChannel: canonicalTitle,
+            country: ident.country || '',
+            countryCode: ident.countryCode || '',
+            countryFlag: ident.countryFlag || '',
+            language: ident.language || '',
+            resolution: ident.resolution || '',
+            isBackup: ident.isBackup || false,
+            isTimeshift: ident.isTimeshift || false,
+            type: ch.type || 'channel',
             url: ch.url || ch.api || '',
             links: ch.links || '',
             headers: ch.headers || {},
@@ -95,7 +112,11 @@ class SkTechProvider extends BaseProvider {
             drmLicense: ch.drmLicense,
             group: ch.group
           }]
-        }));
+        });
+        entity.channelIdentityKey = identityKey;
+        entity.channelNumber = channelNumber;
+        entity.canonicalTitle = canonicalTitle;
+        matches.push(entity);
       }
     } catch (err) {
       console.warn(`[${this.name}] Failed to fetch 24/7 channels:`, err.message);

@@ -1223,12 +1223,19 @@ async function handleStream(type, id, config) {
       }
     }
 
-    const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
-    const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
+    const isChannelCard = match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_'));
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
     const bitrateText = s.bitrate ? ` · ${s.bitrate}` : '';
-    s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
+
+    if (isChannelCard) {
+      const channelLabel = formatChannelStreamTitle(s, match, providerName, countryInfo, quality, channelName, originalTitle);
+      s.title = `${channelLabel}${bitrateText}${viewersText}${speedText}`;
+    } else {
+      const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
+      const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
+      s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
+    }
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
@@ -1350,6 +1357,60 @@ function isLikelyPerTeamChannel(stream) {
 }
 
 // Keep every non-team-channel stream; keep team channels only once the fixture
+/**
+ * Formats a clean, explicit stream label for 24/7 channels:
+ * Provider | Channel — Country [Flag] — Language — Quality [Backup] [+1 Delay]
+ */
+function formatChannelStreamTitle(s, match, providerNameOverride, countryInfo, qualityOverride, channelNameOverride, originalTitleOverride) {
+  const niceNames = {
+    daddylive: 'DaddyLive',
+    watchfooty: 'WatchFooty',
+    cdnlive: 'CDNLiveTV',
+    streamsports99: 'StreamSports99',
+    timstreams: 'TimStreams',
+    streamsports: 'StreamSports',
+    embedindia: 'Streamed.pk',
+    embedst: 'Streamed.pk',
+    streamedpk: 'Streamed.pk',
+    replayzone: 'ReplayZone',
+    livetv: 'LiveTV',
+    damitv: 'DamiTV',
+    soccerfull: 'SoccerFull',
+    basketballvideo: 'BasketballVideo',
+    nflvideo: 'NFLVideo',
+    fullraces: 'FullRaces',
+    hockeyreplays: 'HockeyReplays',
+    mlblive: 'MLBLive',
+    sktech: 'SKTech',
+    vavoo: 'Vavoo',
+    ppvst: 'PPV.st',
+    ak47live: 'AK47Live'
+  };
+
+  const srcKey = s._source || s.sourceName || (s.name && s.name.toLowerCase());
+  let providerName = providerNameOverride || niceNames[srcKey] ||
+    (srcKey ? (srcKey.charAt(0).toUpperCase() + srcKey.slice(1)) : null) ||
+    'Stream';
+  if (srcKey === 'vavoo' || (s.title && s.title.toLowerCase().includes('vavoo'))) providerName = 'Vavoo';
+  else if (srcKey === 'cdnlive' || (s.title && s.title.toLowerCase().includes('cdnlive'))) providerName = 'CDNLiveTV';
+  else if (srcKey === 'daddylive' || (s.title && s.title.toLowerCase().includes('daddylive'))) providerName = 'DaddyLive';
+  else if (srcKey === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
+
+  const origTitle = originalTitleOverride !== undefined ? originalTitleOverride : (s.title || '');
+  const displayChName = s.canonicalChannel || s.channelName || (match && match.title) || channelNameOverride || 'Live Channel';
+  const displayCountry = s.country || s.countryName || (countryInfo && (countryInfo.country || countryInfo.name)) || (s.countryCode ? s.countryCode : '');
+  const displayFlag = s.countryFlag || (countryInfo && countryInfo.flag) || '';
+  const displayCountryPart = displayCountry ? ` — ${displayCountry}${displayFlag ? ' ' + displayFlag : ''}` : '';
+  const displayLanguage = s.language || (countryInfo && countryInfo.language) || 'English';
+  const displayQuality = qualityOverride || s.quality || s.resolution || 'HD';
+  const isBackup = Boolean(s.isBackup || s._isBackup || (s.title && /\bbackup\b/i.test(s.title)) || (origTitle && /\bbackup\b/i.test(origTitle)));
+  const backupTag = isBackup ? ' [Backup]' : '';
+  const isTimeshift = Boolean(s.isTimeshift || s._isTimeshift || (s.title && /(?:\+1|\bdelay\b)/i.test(s.title)) || (origTitle && /(?:\+1|\bdelay\b)/i.test(origTitle)));
+  const timeshiftTag = isTimeshift ? ' [+1 Delay]' : '';
+
+  return `${providerName} | ${displayChName}${displayCountryPart} — ${displayLanguage} — ${displayQuality}${backupTag}${timeshiftTag}`;
+}
+
 // is genuinely under way (or inside its normal pre-kickoff lead window).
 // Returns the SAME array reference when nothing needs changing, so callers must
 // not assume it is a fresh array.
@@ -1382,5 +1443,6 @@ module.exports = {
   verifyStreams,
   // Exported for direct unit testing of the resolution deduplication algorithm
   // without requiring a live container / IoC / match-cache setup.
-  deduplicateResolutions
+  deduplicateResolutions,
+  formatChannelStreamTitle
 };

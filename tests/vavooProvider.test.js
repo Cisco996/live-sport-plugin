@@ -39,7 +39,7 @@ describe('VavooProvider & Dual-Ping Architecture', () => {
       expect(first.category).toBe('networks');
       expect(first.date === '0' || first.date === '').toBe(true);
       expect(first.id).toMatch(/^vavoo_ch_/);
-      expect(first.sources.length).toBe(1);
+      expect(first.sources.length).toBeGreaterThanOrEqual(1);
       expect(first.sources[0].source).toBe('vavoo');
       expect(first.sources[0].type).toBe('channel');
 
@@ -50,6 +50,14 @@ describe('VavooProvider & Dual-Ping Architecture', () => {
       // Verify 4K channels exist in the catalog
       const fourK = matches.filter(m => /4k|uhd/i.test(m.title));
       expect(fourK.length).toBeGreaterThanOrEqual(70);
+
+      // Regional, language, quality, and backup variants are alternatives on
+      // one Cartoon Network card rather than duplicate catalog entries.
+      const cartoonNetwork = matches.filter(m => m.title === 'CARTOON NETWORK');
+      expect(cartoonNetwork).toHaveLength(1);
+      expect(cartoonNetwork[0].league).toBe('Multi-region');
+      expect(cartoonNetwork[0].sources.length).toBeGreaterThanOrEqual(20);
+      expect(cartoonNetwork[0].sources.map(s => s.group)).toEqual(expect.arrayContaining(['Arabia', 'France', 'Germany', 'Italy', 'United Kingdom']));
     });
   });
 

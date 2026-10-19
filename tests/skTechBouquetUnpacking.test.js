@@ -152,7 +152,7 @@ https://livetv.example/ipl.m3u8|User-Agent=CustomUA/1.0&Referer=https://example.
       ]);
 
       const matches = await provider.getMatches();
-      const sunTv = matches.find(m => m.title === 'Sun TV HD');
+      const sunTv = matches.find(m => m.title === 'Sun TV' || m.title === 'Sun TV HD');
       expect(sunTv).toBeDefined();
       expect(sunTv.category).toBe('networks');
       expect(sunTv.league).toBe('Sun NXT');
