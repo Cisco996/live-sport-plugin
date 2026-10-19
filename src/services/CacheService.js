@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const CACHE_SCHEMA_VERSION = 3;
+const CACHE_SCHEMA_VERSION = 4;
 
 function diskSignature(stats) {
   // Atomic replacements can share a timestamp or move it backwards. Compare
@@ -18,10 +18,6 @@ function resolveCacheFile() {
   // own temp file so parallel tests are isolated; production paths unchanged.
   if (process.env.JEST_WORKER_ID) {
     return path.join(os.tmpdir(), `nuvio-matches-cache-test-${process.pid}.json`);
-  }
-  const srcDataDir = path.join(process.cwd(), 'src', 'data');
-  if (fs.existsSync(srcDataDir)) {
-    return path.join(srcDataDir, 'matches_cache.json');
   }
   const rootDataDir = path.join(process.cwd(), 'data');
   if (!fs.existsSync(rootDataDir)) {

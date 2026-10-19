@@ -168,7 +168,7 @@ class CdnLiveProvider extends BaseProvider {
           category: 'networks',
           date: '0',
           popular: '1',
-          league: 'Live TV',
+          league: ident.country || region || 'Live TV',
           sources: [{
             source: 'cdnlive',
             id: CHANNEL_PREFIX + c.url,

@@ -1,5 +1,6 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
+const ChannelIdentityService = require('./services/ChannelIdentityService');
 const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
 const { rewriteHlsUri } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
@@ -793,43 +794,80 @@ async function settleBefore(promise, timeoutMs, fallback) {
  * @returns {Array<Object>}
  */
 function deduplicateResolutions(streams) {
-  const RES_RANK = {
-    '1080p': 1080, '720p': 720, '540p': 540,
-    '480p': 480,   '360p': 360, '240p': 240, '144p': 144
-  };
-
   const streamGroupMap = new Map();
   const dedupedStreams = [];
+  const seenUrls = new Set();
 
   for (const s of streams) {
-    // Quality deduplication applies ONLY AND ONLY to SKTech streams (e.g. FanCode multi-bitrate feeds).
-    // NEVER apply to DaddyLive or any other provider!
+    // Quality deduplication applies ONLY to SKTech and Vavoo streams.
+    // NEVER apply to DaddyLive or other multi-mirror providers!
     const isDaddyLive = s._source === 'daddylive' || /\bdaddylive\b|\bdlhd\b/i.test(`${s.name || ''} ${s.title || ''}`);
     const isSktech = !isDaddyLive && (s._source === 'sktech' || /\bsk\s*tech\b|\bsktech\b/i.test(`${s.name || ''} ${s.title || ''}`));
+    const isVavoo = !isDaddyLive && (s._source === 'vavoo' || /\bvavoo\b/i.test(`${s.name || ''} ${s.title || ''}`));
 
-    if (!isSktech) {
+    if (!isSktech && !isVavoo) {
       dedupedStreams.push(s);
+      continue;
+    }
+
+    // Deduplicate identical playback URLs for Vavoo & SKTech
+    if (s.url && seenUrls.has(`${s._source || s.name}:${s.url}`)) {
       continue;
     }
 
     const rawTitle = (s.title || s.name || s.resolution || '').toLowerCase();
-    const resM = rawTitle.match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/);
-    if (!resM) {
-      dedupedStreams.push(s);
+
+    if (isSktech) {
+      const resM = rawTitle.match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/);
+      if (!resM) {
+        if (s.url) seenUrls.add(`${s._source || s.name}:${s.url}`);
+        dedupedStreams.push(s);
+        continue;
+      }
+      const resTag = resM[1];
+
+      // For SKTech, 720p and 1080p work — drop lower resolutions (540p, 480p, 360p, 240p, 144p)
+      if (resTag !== '1080p' && resTag !== '720p') {
+        continue;
+      }
+
+      // Keep both 1080p and 720p per stream feed, preventing duplicate identical resolutions
+      const baseKey = `sktech:${s.name || ''}:${resTag}:${rawTitle.replace(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/g, '').replace(/[\s\(\)\[\]]+/g, ' ').trim()}`;
+
+      if (!streamGroupMap.has(baseKey)) {
+        streamGroupMap.set(baseKey, s);
+        if (s.url) seenUrls.add(`${s._source || s.name}:${s.url}`);
+        dedupedStreams.push(s);
+      }
       continue;
     }
-    const resTag  = resM[1];
 
-    // For SKTech, 720p and 1080p work — drop lower resolutions (540p, 480p, 360p, 240p, 144p)
-    if (resTag !== '1080p' && resTag !== '720p') {
-      continue;
-    }
+    if (isVavoo) {
+      const resM = rawTitle.match(/\b(4k|uhd|1080p|720p|sd)\b/i);
+      const resTag = resM ? resM[1].toLowerCase() : (s.resolution ? String(s.resolution).toLowerCase() : '1080p');
+      const lang = (s.language || 'default').toLowerCase();
+      // Normalize channel name via ChannelIdentityService so singular/plural brand stems
+      // (e.g. TNT SPORT 1 vs TNT SPORTS 1 vs TNT SPORTS 1 HD) produce the exact same identity key
+      const channelIdent = ChannelIdentityService.parseChannel(s.channelName || s.canonicalChannel || s.title || '');
+      const channelKey = channelIdent.identityKey || 'vavoo_channel';
+      const baseKey = `vavoo:${channelKey}:${resTag}:${lang}`;
 
-    // Keep both 1080p and 720p per stream feed, preventing duplicate identical resolutions
-    const baseKey = `${s.name || ''}:${resTag}:${rawTitle.replace(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/g, '').replace(/[\s\(\)\[\]]+/g, ' ').trim()}`;
+      if (streamGroupMap.has(baseKey)) {
+        const existing = streamGroupMap.get(baseKey);
+        // Prefer higher quality or non-backup feed
+        if ((s.score || 0) > (existing.score || 0) || (!s.isBackup && existing.isBackup)) {
+          const idx = dedupedStreams.indexOf(existing);
+          if (idx !== -1) {
+            dedupedStreams[idx] = s;
+            streamGroupMap.set(baseKey, s);
+            if (s.url) seenUrls.add(`${s._source || s.name}:${s.url}`);
+          }
+        }
+        continue;
+      }
 
-    if (!streamGroupMap.has(baseKey)) {
       streamGroupMap.set(baseKey, s);
+      if (s.url) seenUrls.add(`${s._source || s.name}:${s.url}`);
       dedupedStreams.push(s);
     }
   }

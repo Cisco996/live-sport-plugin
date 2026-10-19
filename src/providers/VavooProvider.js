@@ -279,12 +279,31 @@ function toVavooChannelSource(channel) {
   };
 }
 
+// ─── Vavoo Base Sites & Mirror Domains ──────────────────────────────────────
+const VAVOO_BASE_SITES = [
+  'https://vavoo.to',
+  'https://kool.to',
+  'https://vavoo.net',
+  'https://kool.ws'
+];
+
+const VAVOO_MIRROR_DOMAINS = [
+  'vavoo.to',
+  'kool.to',
+  'vavoo.net',
+  'kool.ws',
+  'huhu.to',
+  'oha.to',
+  'voltop.net'
+];
+
 // ─── VavooProvider Class ────────────────────────────────────────────────────
 class VavooProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
     this.name = 'VavooProvider';
     this.sourceName = 'vavoo';
+    this.baseIndex = 0;
     let customTm = null;
     try {
       if (opts && Object.prototype.hasOwnProperty.call(opts, 'tokenManager')) {
@@ -312,59 +331,56 @@ class VavooProvider extends BaseProvider {
       return [];
     }
 
-    const collapsedChannels = new Map();
+    const collapsedMap = new Map();
     for (const ch of catalog) {
-      const key = getVavooChannelKey(ch);
-      if (!key) continue;
-      const group = collapsedChannels.get(key) || [];
-      group.push(ch);
-      collapsedChannels.set(key, group);
-    }
-
-    const standaloneChannels = catalog.filter(ch => !getVavooChannelKey(ch));
-    const channelRows = [
-      ...standaloneChannels.map(ch => ({ channel: ch, sources: [ch] })),
-      ...Array.from(collapsedChannels.entries()).map(([key, sources]) => ({
-        channel: {
-          ...sources[0],
-          id: key,
-          name: key === 'cartoon-network' ? 'CARTOON NETWORK' : sources[0].name,
-          group: 'Multi-region'
-        },
-        sources
-      }))
-    ];
-
-    return channelRows.map(({ channel: ch, sources }) => {
-      const isPopular = ch.is4k || (ch.group === 'United Kingdom' && /sky sport|tnt sport/i.test(ch.name));
-      const hasGroup = ch.group && typeof ch.group === 'string' && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(ch.group.trim());
-      const groupLower = hasGroup ? ch.group.toLowerCase().trim() : '';
-      const nameLower = ch.name.toLowerCase();
-      const groupInName = hasGroup && (
-        nameLower.includes(groupLower) ||
-        (groupLower === 'united kingdom' && /\b(?:uk)\b/i.test(nameLower)) ||
-        (groupLower === 'united states' && /\b(?:usa?)\b/i.test(nameLower)) ||
-        (groupLower === 'germany' && /\b(?:de|ger)\b/i.test(nameLower)) ||
-        (groupLower === 'france' && /\b(?:fr)\b/i.test(nameLower)) ||
-        (groupLower === 'spain' && /\b(?:es)\b/i.test(nameLower)) ||
-        (groupLower === 'italy' && /\b(?:it)\b/i.test(nameLower)) ||
-        (groupLower === 'turkey' && /\b(?:tr)\b/i.test(nameLower))
-      );
-      const displayTitle = (hasGroup && !groupInName) ? `${ch.name} (${ch.group})` : ch.name;
+      const specialKey = getVavooChannelKey(ch);
       const ident = ChannelIdentityService.parseChannel(ch.name, {
         group: ch.group,
         language: ch.language,
         is4k: ch.is4k
       });
+      const groupKey = (ch.group && typeof ch.group === 'string' && ch.group.trim()) ? ch.group.trim() : 'all';
+      const collapseKey = specialKey ? `special:${specialKey}` : `${groupKey}:${ident.identityKey}`;
+
+      if (!collapsedMap.has(collapseKey)) {
+        collapsedMap.set(collapseKey, {
+          channel: ch,
+          ident,
+          specialKey,
+          sources: []
+        });
+      }
+      const entry = collapsedMap.get(collapseKey);
+      if ((ch.is4k && !entry.channel.is4k) || (!ident.isBackup && entry.ident.isBackup)) {
+        entry.channel = ch;
+        entry.ident = ident;
+      }
+      entry.sources.push(ch);
+    }
+
+    return Array.from(collapsedMap.values()).map(({ channel: ch, ident, specialKey, sources }) => {
+      const is4K = ch.is4k || sources.some(s => s.is4k) || /\b(?:4k|uhd)\b/i.test(ch.name);
+      const isPopular = is4K || (ch.group === 'United Kingdom' && /sky sport|tnt sport/i.test(ch.name));
+
+      let title = ident.canonicalTitle;
+      if (specialKey === 'cartoon-network') {
+        title = 'CARTOON NETWORK';
+      } else if (is4K && !/4k|uhd/i.test(title)) {
+        title = `${title} 4K`;
+      }
+
+      const league = specialKey === 'cartoon-network'
+        ? 'Multi-region'
+        : (ch.group || ident.country || 'Live TV');
 
       const entity = new MatchEntity({
-        id: `vavoo_ch_${ch.id}`,
-        title: displayTitle,
-        baseTitle: displayTitle,
+        id: `vavoo_ch_${specialKey || ch.id}`,
+        title,
+        baseTitle: title,
         category: 'networks',
         date: '0', // Evergreen — 24/7 continuous channel
         popular: isPopular ? '1' : '0',
-        league: ch.group || 'Live TV',
+        league,
         logo: undefined,
         thumbnail_url: undefined,
         sources: sources.map(toVavooChannelSource)
@@ -379,6 +395,7 @@ class VavooProvider extends BaseProvider {
   /**
    * Resolves a direct playable stream URL for a 24/7 channel.
    * Strictly adheres to Zero Server Bandwidth: returns Sunshine CDN link + proxyHeaders.
+   * Rotates through VAVOO_BASE_SITES mirrors on failure for maximum resilience.
    *
    * @param {string} sourceId
    * @param {string} matchCategory
@@ -391,46 +408,119 @@ class VavooProvider extends BaseProvider {
       return [];
     }
 
-    const vavooUrl = src.id || sourceId;
-    if (!vavooUrl || !vavooUrl.includes('vavoo.to')) {
+    let vavooUrl = src.id || sourceId;
+    if (!vavooUrl || typeof vavooUrl !== 'string') {
       return [];
     }
 
+    const hasMirrorDomain = VAVOO_MIRROR_DOMAINS.some(d => vavooUrl.toLowerCase().includes(d));
+    if (!hasMirrorDomain) {
+      return [];
+    }
+
+    // Normalize /watch?live=X to canonical /vavoo-iptv/play/X
+    if (vavooUrl.includes('/watch')) {
+      try {
+        const u = new URL(vavooUrl);
+        const liveId = u.searchParams.get('live');
+        if (liveId) {
+          vavooUrl = `https://vavoo.to/vavoo-iptv/play/${liveId}`;
+        }
+      } catch (_) {}
+    }
+
+    // Normalize /play/X to canonical /vavoo-iptv/play/X
+    const playMatch = vavooUrl.match(/\/play\/([^/?#]+)/);
+    if (playMatch && !vavooUrl.includes('/vavoo-iptv/play/')) {
+      vavooUrl = `https://vavoo.to/vavoo-iptv/play/${playMatch[1]}`;
+    }
+
     try {
-      const sig = await this.tokenManager.getOrRefreshSig(this.proxyFetch.bind(this));
-
-      const resolveRes = await this.proxyFetch('https://vavoo.to/mediahubmx-resolve.json', {
-        method: 'POST',
-        headers: {
-          'user-agent': 'MediaHubMX/2',
-          'accept': 'application/json',
-          'content-type': 'application/json; charset=utf-8',
-          'mediahubmx-signature': sig
-        },
-        body: JSON.stringify({
-          language: 'de',
-          region: 'AT',
-          url: vavooUrl,
-          clientVersion: '3.1.0'
-        }),
-        timeoutMs: 8000
-      });
-
-      if (!resolveRes.ok) {
-        console.warn(`[${this.name}] Resolve failed for "${matchTitle}": HTTP ${resolveRes.status}`);
-        return [];
-      }
-
-      const j = await resolveRes.json();
+      let sig = await this.tokenManager.getOrRefreshSig(this.proxyFetch.bind(this));
       let streamUrl = null;
-      if (Array.isArray(j) && j[0]?.url) {
-        streamUrl = String(j[0].url);
-      } else if (j?.url) {
-        streamUrl = String(j.url);
+      let lastErr = null;
+      const startBaseIndex = this.baseIndex;
+
+      for (let i = 0; i < VAVOO_BASE_SITES.length; i++) {
+        const siteIndex = (startBaseIndex + i) % VAVOO_BASE_SITES.length;
+        const baseSite = VAVOO_BASE_SITES[siteIndex];
+        const resolveEndpoint = `${baseSite}/mediahubmx-resolve.json`;
+
+        try {
+          const resolveRes = await this.proxyFetch(resolveEndpoint, {
+            method: 'POST',
+            headers: {
+              'user-agent': 'MediaHubMX/2',
+              'accept': 'application/json',
+              'content-type': 'application/json; charset=utf-8',
+              'mediahubmx-signature': sig,
+              'origin': baseSite,
+              'referer': `${baseSite}/`
+            },
+            body: JSON.stringify({
+              language: 'de',
+              region: 'AT',
+              url: vavooUrl,
+              clientVersion: '3.1.0'
+            }),
+            timeoutMs: 8000
+          });
+
+          // Switch base site on 451, 500, 502, 503, 504 gateway/service errors
+          if ([451, 500, 502, 503, 504].includes(resolveRes.status)) {
+            lastErr = new Error(`HTTP ${resolveRes.status} on ${baseSite}`);
+            console.warn(`[${this.name}] Resolve status ${resolveRes.status} on ${baseSite}, switching base site...`);
+            this.baseIndex = (siteIndex + 1) % VAVOO_BASE_SITES.length;
+            continue;
+          }
+
+          // If signature expired/rejected (401, 403), force a signature refresh and try once more on next base
+          if (resolveRes.status === 401 || resolveRes.status === 403) {
+            lastErr = new Error(`HTTP ${resolveRes.status} signature error on ${baseSite}`);
+            console.warn(`[${this.name}] Signature rejected (${resolveRes.status}) on ${baseSite}, refreshing token...`);
+            try {
+              const refreshed = await this.tokenManager._fetchDualSig(this.proxyFetch.bind(this));
+              if (refreshed && refreshed.sig) {
+                sig = refreshed.sig;
+                this.tokenManager.sig = refreshed.sig;
+                this.tokenManager.validUntil = refreshed.validUntil;
+              }
+            } catch (_) {}
+            this.baseIndex = (siteIndex + 1) % VAVOO_BASE_SITES.length;
+            continue;
+          }
+
+          if (!resolveRes.ok) {
+            lastErr = new Error(`HTTP ${resolveRes.status} on ${baseSite}`);
+            console.warn(`[${this.name}] Resolve failed on ${baseSite} for "${matchTitle}": HTTP ${resolveRes.status}`);
+            continue;
+          }
+
+          const j = await resolveRes.json();
+          if (Array.isArray(j) && j[0]?.url) {
+            streamUrl = String(j[0].url);
+          } else if (j?.url) {
+            streamUrl = String(j.url);
+          } else if (j?.data?.url) {
+            streamUrl = String(j.data.url);
+          }
+
+          if (streamUrl) {
+            // Update active baseIndex to the successful one so subsequent calls start from the healthy mirror
+            this.baseIndex = siteIndex;
+            break;
+          } else {
+            console.warn(`[${this.name}] Empty URL in resolve response from ${baseSite} for "${matchTitle}"`);
+          }
+        } catch (fetchErr) {
+          lastErr = fetchErr;
+          console.warn(`[${this.name}] Network error resolving on ${baseSite}: ${fetchErr.message}, switching base site...`);
+          this.baseIndex = (siteIndex + 1) % VAVOO_BASE_SITES.length;
+        }
       }
 
       if (!streamUrl) {
-        console.warn(`[${this.name}] No stream URL returned in resolve payload for "${matchTitle}"`);
+        console.warn(`[${this.name}] All Vavoo base sites exhausted for "${matchTitle}". Last error: ${lastErr ? lastErr.message : 'No stream URL'}`);
         return [];
       }
 
@@ -448,6 +538,7 @@ class VavooProvider extends BaseProvider {
         language: src.language || undefined,
         channelName: channelLabel,
         group: src.group,
+        is4k: is4K,
         behaviorHints: {
           notWebReady: true,
           proxyHeaders: {
@@ -468,3 +559,5 @@ class VavooProvider extends BaseProvider {
 module.exports = VavooProvider;
 module.exports.VavooTokenManager = VavooTokenManager;
 module.exports.globalTokenManager = globalTokenManager;
+module.exports.VAVOO_BASE_SITES = VAVOO_BASE_SITES;
+module.exports.VAVOO_MIRROR_DOMAINS = VAVOO_MIRROR_DOMAINS;

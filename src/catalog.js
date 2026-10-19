@@ -1570,12 +1570,27 @@ async function handleCatalogUncached(type, id, extra, config) {
     }
   }
   if (extra && extra.search) {
-    const q = extra.search.toLowerCase();
-    filteredMatches = filteredMatches.filter(m => 
-      (m.title && m.title.toLowerCase().includes(q)) || 
-      (m.league && m.league.toLowerCase().includes(q)) ||
-      (m.sources && m.sources.some(s => s.channelName && s.channelName.toLowerCase().includes(q)))
-    );
+    const searchRaw = String(extra.search).trim().toLowerCase();
+    const tokens = searchRaw.split(/\s+/).filter(Boolean);
+    if (tokens.length > 0) {
+      filteredMatches = filteredMatches.filter(m => {
+        const title = (m.title || '').toLowerCase();
+        const baseTitle = (m.baseTitle || '').toLowerCase();
+        const canonicalTitle = (m.canonicalTitle || '').toLowerCase();
+        const league = (m.league || '').toLowerCase();
+
+        // Fast path: direct substring match on title or league
+        if (title.includes(searchRaw) || league.includes(searchRaw)) return true;
+
+        // Multi-token match: every token must be found in the match metadata or channel names
+        const sourceNames = (m.sources && Array.isArray(m.sources))
+          ? m.sources.map(s => `${s.channelName || ''} ${s.canonicalChannel || ''}`).join(' ').toLowerCase()
+          : '';
+        const haystack = `${title} ${baseTitle} ${canonicalTitle} ${league} ${sourceNames}`;
+
+        return tokens.every(tok => haystack.includes(tok));
+      });
+    }
   }
 
   // Support standard Stremio pagination via extra.skip

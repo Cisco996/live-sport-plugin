@@ -579,6 +579,23 @@ class MatchAggregator {
       return false;
     }
 
+    // 0c. Continuous 24/7 TV channels: Universal Channel Identity.
+    // Preserves channel numbers (e.g. Astro Cricket 1 vs 2 remain separate).
+    // Aggregates regional, language, quality, and backup variants into one card.
+    // Evaluated immediately to avoid fixture-specific guards (motorsport series, token length, date diffs).
+    if (p1.isChannel && p2.isChannel) {
+      // 1. Strict channel number protection: different numbers NEVER merge!
+      if (p1.channelNumber !== p2.channelNumber) return false;
+
+      // 2. Universal Channel Identity Key match
+      if (p1.channelIdentityKey && p2.channelIdentityKey) {
+        return p1.channelIdentityKey === p2.channelIdentityKey;
+      }
+
+      if (p1.norm === p2.norm) return true;
+      return false;
+    }
+
     // 1. Category mismatch guard
     // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
     // while others use the parent sport name (basketball, american_football,
@@ -654,21 +671,6 @@ class MatchAggregator {
       return true;
     }
 
-    // 6b. Both channel-like: Universal Channel Identity.
-    // Preserves channel numbers (e.g. Astro Cricket 1 vs 2 remain separate).
-    // Aggregates regional, language, quality, and backup variants into one card.
-    if (p1.isChannel && p2.isChannel) {
-      // 1. Strict channel number protection: different numbers NEVER merge!
-      if (p1.channelNumber !== p2.channelNumber) return false;
-
-      // 2. Universal Channel Identity Key match
-      if (p1.channelIdentityKey && p2.channelIdentityKey) {
-        return p1.channelIdentityKey === p2.channelIdentityKey;
-      }
-
-      if (p1.norm !== p2.norm) return false;
-      return true;
-    }
     if (p1.norm === p2.norm) return true;
 
     // 6c. Motorsport specific fallback: Formula 1, MotoGP, NASCAR, etc.
@@ -1072,13 +1074,15 @@ class MatchAggregator {
           finalPres[idx] = pre;
         } else if (pre.isChannel && finalPres[idx].isChannel) {
           existing.category = 'networks';
-          if (pre.canonicalTitle && (!existing._canonicalTitleSet || existing.title.includes('('))) {
-            existing.title = pre.canonicalTitle;
-            existing.baseTitle = pre.canonicalTitle;
+          const targetCanonicalTitle = existing.canonicalTitle || pre.canonicalTitle;
+          if (targetCanonicalTitle) {
+            existing.title = targetCanonicalTitle;
+            existing.baseTitle = targetCanonicalTitle;
+            existing.canonicalTitle = targetCanonicalTitle;
             existing._canonicalTitleSet = true;
           }
-          if (pre.channelIdentityKey) existing.channelIdentityKey = pre.channelIdentityKey;
-          if (pre.channelNumber) existing.channelNumber = pre.channelNumber;
+          if (!existing.channelIdentityKey && pre.channelIdentityKey) existing.channelIdentityKey = pre.channelIdentityKey;
+          if (!existing.channelNumber && pre.channelNumber) existing.channelNumber = pre.channelNumber;
         }
         }
         if (end < providerMatches.length) await yieldToLoop();

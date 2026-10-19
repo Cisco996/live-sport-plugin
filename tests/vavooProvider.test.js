@@ -264,4 +264,116 @@ describe('VavooProvider & Dual-Ping Architecture', () => {
       expect(aggregator.isSameEvent(vavooChannel, replay)).toBe(false);
     });
   });
+
+  describe('Multi-Base Mirror Failover (VAVOO_BASE_SITES)', () => {
+    it('fails over to kool.to when vavoo.to returns 502 or 500 error', async () => {
+      process.env.VAVOO_ENABLED = 'true';
+      const mockTokenManager = {
+        getOrRefreshSig: jest.fn().mockResolvedValue('valid_sig')
+      };
+      const provider = new VavooProvider({ tokenManager: mockTokenManager });
+
+      const fakeCdnUrl = 'https://vavoo.to/live2/play/123/index.m3u8';
+      provider.proxyFetch = jest.fn().mockImplementation((url) => {
+        if (url.startsWith('https://vavoo.to/')) {
+          return Promise.resolve({ ok: false, status: 502 });
+        }
+        if (url.startsWith('https://kool.to/')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve([{ url: fakeCdnUrl }])
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const streams = await provider.resolveStream(
+        'https://vavoo.to/vavoo-iptv/play/123',
+        'networks',
+        'Sky Sports F1'
+      );
+
+      expect(streams.length).toBe(1);
+      expect(streams[0].url).toBe(fakeCdnUrl);
+      expect(provider.baseIndex).toBe(1); // Rotated to kool.to
+    });
+
+    it('rotates baseIndex so subsequent calls start from the healthy mirror', async () => {
+      process.env.VAVOO_ENABLED = 'true';
+      const mockTokenManager = {
+        getOrRefreshSig: jest.fn().mockResolvedValue('valid_sig')
+      };
+      const provider = new VavooProvider({ tokenManager: mockTokenManager });
+      provider.baseIndex = 1; // already on kool.to
+
+      const fakeCdnUrl = 'https://vavoo.to/live2/play/456/index.m3u8';
+      provider.proxyFetch = jest.fn().mockImplementation((url) => {
+        if (url.startsWith('https://kool.to/')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve([{ url: fakeCdnUrl }])
+          });
+        }
+        return Promise.resolve({ ok: false, status: 500 });
+      });
+
+      const streams = await provider.resolveStream(
+        'https://vavoo.to/vavoo-iptv/play/456',
+        'networks',
+        'TNT Sports 2'
+      );
+
+      expect(streams.length).toBe(1);
+      expect(provider.proxyFetch).toHaveBeenCalledTimes(1);
+      expect(provider.proxyFetch.mock.calls[0][0]).toContain('https://kool.to/');
+    });
+
+    it('normalizes mirror and watch URLs (e.g. kool.to, /watch?live=X, /play/X)', async () => {
+      process.env.VAVOO_ENABLED = 'true';
+      const mockTokenManager = {
+        getOrRefreshSig: jest.fn().mockResolvedValue('valid_sig')
+      };
+      const provider = new VavooProvider({ tokenManager: mockTokenManager });
+
+      const fakeCdnUrl = 'https://vavoo.to/live2/play/norm123/index.m3u8';
+      provider.proxyFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([{ url: fakeCdnUrl }])
+      });
+
+      const streams = await provider.resolveStream(
+        'https://kool.to/watch?live=norm123',
+        'networks',
+        'DAZN 1'
+      );
+
+      expect(streams.length).toBe(1);
+      const callBody = JSON.parse(provider.proxyFetch.mock.calls[0][1].body);
+      expect(callBody.url).toBe('https://vavoo.to/vavoo-iptv/play/norm123');
+    });
+
+    it('returns empty array when all base sites fail without crashing', async () => {
+      process.env.VAVOO_ENABLED = 'true';
+      const mockTokenManager = {
+        getOrRefreshSig: jest.fn().mockResolvedValue('valid_sig')
+      };
+      const provider = new VavooProvider({ tokenManager: mockTokenManager });
+      provider.proxyFetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503
+      });
+
+      const streams = await provider.resolveStream(
+        'https://vavoo.to/vavoo-iptv/play/exhaust_test',
+        'networks',
+        'Offline Channel'
+      );
+
+      expect(streams).toEqual([]);
+      expect(provider.proxyFetch).toHaveBeenCalledTimes(4); // Attempted all 4 base sites
+    });
+  });
 });

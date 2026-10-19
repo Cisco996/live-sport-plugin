@@ -6,7 +6,7 @@ const MatchAggregator = require('../src/services/MatchAggregator');
 const CacheService = require('../src/services/CacheService');
 const MatchEntity = require('../src/domain/MatchEntity');
 const StreamEntity = require('../src/domain/StreamEntity');
-const { formatChannelStreamTitle } = require('../src/streams');
+const { formatChannelStreamTitle, deduplicateResolutions } = require('../src/streams');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -37,7 +37,7 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       const res = ChannelIdentityService.parseChannel('Sky Sports Main Event UHD 4K 50FPS HEVC H.265');
       expect(res.canonicalTitle).toBe('Sky Sports Main Event');
       expect(res.resolution).toBe('4K');
-      expect(res.identityKey).toBe('skysportsmainevent');
+      expect(res.identityKey).toBe('skysportmainevent');
     });
 
     test('identifies backup feeds and strips backup markers', () => {
@@ -45,7 +45,69 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       expect(res.canonicalTitle).toBe('TNT Sports 1');
       expect(res.isBackup).toBe(true);
       expect(res.resolution).toBe('HD');
-      expect(res.identityKey).toBe('tntsports1');
+      expect(res.identityKey).toBe('tntsport1');
+    });
+
+    test('normalizes sports singular/plural mismatch so TNT SPORT 1 and TNT SPORTS 1 yield exact same key', () => {
+      const singular = ChannelIdentityService.parseChannel('TNT SPORT 1');
+      const plural = ChannelIdentityService.parseChannel('TNT SPORTS 1');
+      const pluralHD = ChannelIdentityService.parseChannel('TNT SPORTS 1 HD');
+
+      expect(singular.canonicalTitle).toBe('TNT Sports 1');
+      expect(plural.canonicalTitle).toBe('TNT Sports 1');
+      expect(pluralHD.canonicalTitle).toBe('TNT Sports 1');
+
+      expect(singular.identityKey).toBe('tntsport1');
+      expect(plural.identityKey).toBe('tntsport1');
+      expect(pluralHD.identityKey).toBe('tntsport1');
+
+      expect(singular.channelNumber).toBe('1');
+      expect(plural.channelNumber).toBe('1');
+    });
+
+    test('preserves single-letter brand acronyms like F1, M6, TF1 without splitting or false channel numbers', () => {
+      const f1 = ChannelIdentityService.parseChannel('Sky Sports F1');
+      expect(f1.canonicalTitle).toBe('Sky Sports F1');
+      expect(f1.channelNumber).toBeNull();
+      expect(f1.identityKey).toBe('skysportf1');
+
+      const tf1 = ChannelIdentityService.parseChannel('TF1 HD');
+      expect(tf1.canonicalTitle).toBe('TF1');
+      expect(tf1.channelNumber).toBeNull();
+
+      const m6 = ChannelIdentityService.parseChannel('M6 France');
+      expect(m6.canonicalTitle).toBe('M6');
+      expect(m6.channelNumber).toBeNull();
+    });
+
+    test('splits glued digits for multi-letter channel names and extracts channel number', () => {
+      const bundesliga = ChannelIdentityService.parseChannel('Sky Bundesliga1');
+      expect(bundesliga.canonicalTitle).toBe('Sky Bundesliga 1');
+      expect(bundesliga.channelNumber).toBe('1');
+      expect(bundesliga.identityKey).toBe('skybundesliga1');
+
+      const tnt1 = ChannelIdentityService.parseChannel('TNT1');
+      expect(tnt1.canonicalTitle).toBe('TNT 1');
+      expect(tnt1.channelNumber).toBe('1');
+      expect(tnt1.identityKey).toBe('tnt1');
+    });
+
+    test('strips flag emojis, feed modifiers, and regional country codes', () => {
+      const emojiCh = ChannelIdentityService.parseChannel('TNT Sports 1 🇬🇧 [RAW]');
+      expect(emojiCh.canonicalTitle).toBe('TNT Sports 1');
+
+      const localCh = ChannelIdentityService.parseChannel('Sky Sports Main Event (LOCAL)');
+      expect(localCh.canonicalTitle).toBe('Sky Sports Main Event');
+
+      const matchTimeCh = ChannelIdentityService.parseChannel('TNT Sports 2 (MATCH TIME) FEED');
+      expect(matchTimeCh.canonicalTitle).toBe('TNT Sports 2');
+      expect(matchTimeCh.channelNumber).toBe('2');
+
+      const deCh = ChannelIdentityService.parseChannel('Sky Sport 1 DE');
+      expect(deCh.canonicalTitle).toBe('Sky Sports 1');
+
+      const nzCh = ChannelIdentityService.parseChannel('Sky Sport 1 NZ');
+      expect(nzCh.canonicalTitle).toBe('Sky Sports 1');
     });
 
     test('identifies timeshift delay feeds (+1, +2) and strips timeshift tag', () => {
@@ -152,6 +214,74 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       const merged = aggregator.mergeMatches(chUK, chIT);
       expect(merged.title).toBe('Cartoonito');
       expect(merged.sources.length).toBe(2);
+    });
+
+    test('merges TNT SPORT 1 (Vavoo) with TNT Sports 1 (DaddyLive/CDNLive) into ONE canonical card', () => {
+      const vavooTnt = new MatchEntity({
+        id: 'vavoo_ch_tnt1',
+        title: 'TNT SPORT 1',
+        category: 'networks',
+        date: '0',
+        league: 'United Kingdom',
+        sources: [{ source: 'vavoo', id: 'https://vavoo.to/tnt1', type: 'channel' }]
+      });
+
+      const daddyliveTnt = new MatchEntity({
+        id: 'dlv_ch_123_tnt-sports-1',
+        title: 'TNT Sports 1 HD',
+        category: 'networks',
+        date: '0',
+        league: 'Live TV',
+        sources: [{ source: 'daddylive', id: '123', type: 'channel' }]
+      });
+
+      expect(aggregator.isSameEvent(vavooTnt, daddyliveTnt)).toBe(true);
+
+      const merged = aggregator.mergeMatches(vavooTnt, daddyliveTnt);
+      expect(merged.title).toBe('TNT Sports 1');
+      expect(merged.sources.length).toBe(2);
+    });
+
+    test('updates existing title, baseTitle, and canonicalTitle when merged in syncMatches', async () => {
+      const existing = [
+        new MatchEntity({
+          id: 'vavoo_ch_tnt1',
+          title: 'TNT SPORT 1',
+          baseTitle: 'TNT SPORT 1',
+          category: 'networks',
+          date: '0',
+          league: 'United Kingdom',
+          sources: [{ source: 'vavoo', id: 'v1', type: 'channel' }]
+        })
+      ];
+
+      const incoming = [
+        new MatchEntity({
+          id: 'dlv_ch_123',
+          title: 'TNT Sports 1',
+          baseTitle: 'TNT Sports 1',
+          canonicalTitle: 'TNT Sports 1',
+          category: 'networks',
+          date: '0',
+          league: 'Live TV',
+          sources: [{ source: 'daddylive', id: 'd1', type: 'channel' }]
+        })
+      ];
+
+      let saved = [];
+      const mockCacheService = { getMatches: () => [], setMatches: (m) => { saved = m; } };
+      const agg = new MatchAggregator({ cacheService: mockCacheService });
+      agg.providers = [
+        { sourceName: 'vavoo', getMatches: async () => existing },
+        { sourceName: 'daddylive', getMatches: async () => incoming }
+      ];
+
+      const syncResult = await agg.syncMatches();
+      expect(syncResult.length).toBe(1);
+      expect(syncResult[0].title).toBe('TNT Sports 1');
+      expect(syncResult[0].baseTitle).toBe('TNT Sports 1');
+      expect(syncResult[0].canonicalTitle).toBe('TNT Sports 1');
+      expect(syncResult[0].sources.length).toBe(2);
     });
   });
 
@@ -381,7 +511,7 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       } catch (_) {}
     });
 
-    test('writes schemaVersion = 3 to disk when saving matches', () => {
+    test('writes schemaVersion = 4 to disk when saving matches', () => {
       const match = new MatchEntity({
         id: 'net_astro_cricket',
         title: 'Astro Cricket',
@@ -395,14 +525,14 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
 
       const content = JSON.parse(fs.readFileSync(cacheService.cacheFilePath, 'utf-8'));
       expect(content.schemaVersion).toBe(CacheService.CACHE_SCHEMA_VERSION);
-      expect(content.schemaVersion).toBe(3);
+      expect(content.schemaVersion).toBe(4);
       expect(content.matches.length).toBe(1);
     });
 
-    test('discards and purges legacy disk cache with schemaVersion < 3', () => {
+    test('discards and purges legacy disk cache with schemaVersion < 4', () => {
       // Simulate legacy disk cache saved before universal channel layer
       const legacyPayload = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         timestamp: Date.now(),
         matches: [{ id: 'legacy_split_card', title: 'Cartoon Network (France)', category: 'networks' }]
       };
@@ -414,6 +544,259 @@ describe('Universal 24/7 Channel Identity & Aggregation Architecture', () => {
       // Legacy entries must be purged, not loaded
       expect(newCache.getMatchesReadOnly()).toEqual([]);
       expect(fs.existsSync(cacheService.cacheFilePath)).toBe(false);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Pillar 7: Catalog Multi-Token Search Query
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('Pillar 7: Catalog Multi-Token Search Query', () => {
+    test('matches TNT Sports 1 when user searches "tnt 1"', async () => {
+      const { handleCatalog } = require('../src/catalog');
+      const container = require('../src/container');
+      const cache = container.resolve('cacheService');
+
+      const tntMatch = new MatchEntity({
+        id: 'dlv_ch_tnt1',
+        title: 'TNT Sports 1',
+        baseTitle: 'TNT Sports 1',
+        canonicalTitle: 'TNT Sports 1',
+        category: 'networks',
+        date: '0',
+        league: 'Live TV',
+        sources: [{ source: 'daddylive', channelName: 'TNT Sports 1 HD' }]
+      });
+
+      const skyMatch = new MatchEntity({
+        id: 'dlv_ch_sky1',
+        title: 'Sky Sports Premier League',
+        baseTitle: 'Sky Sports Premier League',
+        canonicalTitle: 'Sky Sports Premier League',
+        category: 'networks',
+        date: '0',
+        league: 'Live TV',
+        sources: [{ source: 'daddylive', channelName: 'Sky Sports Premier League' }]
+      });
+
+      cache.setMatches([tntMatch, skyMatch]);
+
+      const res = await handleCatalog('tv', 'nuvio_sports_networks', { search: 'tnt 1' }, {});
+      expect(res.metas.length).toBe(1);
+      expect(res.metas[0].name).toContain('TNT Sports 1');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Pillar 8: Intra-Card Stream Deduplication
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('Pillar 8: Intra-Card Stream Deduplication', () => {
+    test('deduplicates duplicate Vavoo streams for the same channel, keeping the higher scored stream', () => {
+      const streams = [
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT Sports 1 — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/1/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'TNT Sports 1 — United Kingdom',
+          score: 85,
+          isBackup: false,
+          _source: 'vavoo'
+        },
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT Sports 1 Backup — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/2/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'TNT Sports 1 Backup — United Kingdom',
+          score: 75,
+          isBackup: true,
+          _source: 'vavoo'
+        }
+      ];
+
+      deduplicateResolutions(streams);
+      expect(streams.length).toBe(1);
+      expect(streams[0].isBackup).toBe(false);
+      expect(streams[0].score).toBe(85);
+    });
+
+    test('deduplicates Vavoo streams across singular/plural brand variations (TNT SPORT 1 vs TNT SPORTS 1)', () => {
+      const streams = [
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT SPORT 1 — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/1/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'TNT SPORT 1 — United Kingdom',
+          score: 85,
+          isBackup: false,
+          _source: 'vavoo'
+        },
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT SPORTS 1 — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/2/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'TNT SPORTS 1 — United Kingdom',
+          score: 95,
+          isBackup: false,
+          _source: 'vavoo'
+        },
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT SPORTS 1 HD — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/3/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'TNT SPORTS 1 HD — United Kingdom',
+          score: 90,
+          isBackup: false,
+          _source: 'vavoo'
+        }
+      ];
+
+      deduplicateResolutions(streams);
+      expect(streams.length).toBe(1);
+      expect(streams[0].score).toBe(95);
+    });
+
+    test('deduplicates Vavoo streams across singular/plural Sky Sport Premier League vs Sky Sports Premier League', () => {
+      const streams = [
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (SKY SPORT PREMIER LEAGUE — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/sky1/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'SKY SPORT PREMIER LEAGUE',
+          score: 80,
+          isBackup: false,
+          _source: 'vavoo'
+        },
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (SKY SPORTS PREMIER LEAGUE — United Kingdom) [1080p]',
+          url: 'https://vavoo.to/live2/play/sky2/index.m3u8',
+          resolution: '1080p',
+          language: 'English',
+          channelName: 'SKY SPORTS PREMIER LEAGUE',
+          score: 90,
+          isBackup: false,
+          _source: 'vavoo'
+        }
+      ];
+
+      deduplicateResolutions(streams);
+      expect(streams.length).toBe(1);
+      expect(streams[0].score).toBe(90);
+    });
+
+    test('deduplicates streams with identical URLs for Vavoo', () => {
+      const streams = [
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT Sports 1) [1080p]',
+          url: 'https://vavoo.to/live2/play/same/index.m3u8',
+          resolution: '1080p',
+          _source: 'vavoo'
+        },
+        {
+          name: 'Vavoo',
+          title: 'Vavoo (TNT Sports 1 HD) [1080p]',
+          url: 'https://vavoo.to/live2/play/same/index.m3u8',
+          resolution: '1080p',
+          _source: 'vavoo'
+        }
+      ];
+
+      deduplicateResolutions(streams);
+      expect(streams.length).toBe(1);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Pillar 9: Edge Case Channel Merging in MatchAggregator
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('Pillar 9: Edge Case Channel Merging in MatchAggregator', () => {
+    test('merges motorsport-branded 24/7 channels without being blocked by fixture series guards', () => {
+      const agg = new MatchAggregator({});
+      const c1 = new MatchEntity({
+        id: 'dlv_ch_271_canal-motogp',
+        title: 'Canal+ MotoGP',
+        category: 'networks',
+        date: '0',
+        league: 'France',
+        sources: [{ source: 'daddylive', channelName: 'Canal+ MotoGP France' }]
+      });
+      c1.channelIdentityKey = 'canalmotogp';
+      c1.channelNumber = null;
+      c1.canonicalTitle = 'Canal+ MotoGP';
+
+      const c2 = new MatchEntity({
+        id: 'vavoo_ch_canal-moto-gp-france',
+        title: 'Canal+ Moto Gp',
+        category: 'networks',
+        date: '0',
+        league: 'France',
+        sources: [{ source: 'vavoo', channelName: 'CANAL+ MOTO GP' }]
+      });
+      c2.channelIdentityKey = 'canalmotogp';
+      c2.channelNumber = null;
+      c2.canonicalTitle = 'Canal+ MotoGP';
+
+      expect(agg.isSameEvent(c1, c2)).toBe(true);
+    });
+
+    test('merges 2-character channel names without being rejected by word length filters (C8, M6, W9, FX, TF1)', () => {
+      const agg = new MatchAggregator({});
+      const channels = [
+        { id1: 'dlv_ch_c8', id2: 'vavoo_ch_c8', name: 'C8', key: 'c8' },
+        { id1: 'dlv_ch_m6', id2: 'vavoo_ch_m6', name: 'M6', key: 'm6' },
+        { id1: 'dlv_ch_w9', id2: 'vavoo_ch_w9', name: 'W9', key: 'w9' },
+        { id1: 'dlv_ch_fx', id2: 'vavoo_ch_fx', name: 'FX', key: 'fx' },
+        { id1: 'dlv_ch_tf1', id2: 'vavoo_ch_tf1', name: 'TF1', key: 'tf1' }
+      ];
+
+      for (const ch of channels) {
+        const m1 = new MatchEntity({
+          id: ch.id1,
+          title: ch.name,
+          category: 'networks',
+          date: '0',
+          sources: [{ source: 'daddylive', channelName: ch.name }]
+        });
+        m1.channelIdentityKey = ch.key;
+        m1.channelNumber = null;
+        m1.canonicalTitle = ch.name;
+
+        const m2 = new MatchEntity({
+          id: ch.id2,
+          title: ch.name,
+          category: 'networks',
+          date: '0',
+          sources: [{ source: 'vavoo', channelName: ch.name }]
+        });
+        m2.channelIdentityKey = ch.key;
+        m2.channelNumber = null;
+        m2.canonicalTitle = ch.name;
+
+        expect(agg.isSameEvent(m1, m2)).toBe(true);
+      }
+    });
+
+    test('normalizes SKYS PORTS typo and Canal+ spacing in ChannelIdentityService', () => {
+      const skys = ChannelIdentityService.parseChannel('SKYS PORTS MAIN EVENT');
+      expect(skys.canonicalTitle).toBe('Sky Sports Main Event');
+      expect(skys.identityKey).toBe('skysportmainevent');
+
+      const canal = ChannelIdentityService.parseChannel('CANAL + SPORTS 1 HD');
+      expect(canal.canonicalTitle).toBe('Canal+ Sport 1');
+      expect(canal.identityKey).toBe('canalsport1');
+      expect(canal.channelNumber).toBe('1');
     });
   });
 

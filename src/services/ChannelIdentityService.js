@@ -100,7 +100,7 @@ const COUNTRY_LANG_MAP = {
  * Common network acronyms that should remain UPPERCASE in canonical display titles
  */
 const UPPERCASE_TOKENS = new Set([
-  'TV', 'HD', 'UHD', 'FHD', 'SD', 'BBC', 'ITV', 'CNN', 'ESPN', 'TNT', 'FOX',
+  'TV', 'HD', 'UHD', 'FHD', 'SD', 'BBC', 'ITV', 'CNN', 'ESPN', 'TNT', 'BT', 'FOX',
   'NBC', 'CBS', 'ABC', 'TSN', 'WWE', 'UFC', 'MMA', 'NFL', 'NBA', 'MLB', 'NHL',
   'PGA', 'F1', 'USA', 'UK', 'DAZN', 'TUDN', 'MSNBC', 'CNBC', 'MTV', 'VH1', 'SEC',
   'ACC', 'BTN', 'NESN', 'MASN', 'MSG', 'RDS', 'ORF', 'SRF', 'RAI', 'TF1', 'M6',
@@ -204,21 +204,24 @@ class ChannelIdentityService {
     // 5. Build Canonical Title
     let clean = raw;
 
+    // Strip flag emojis & surrogate pairs
+    clean = clean.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]+/g, ' ');
+
     // Strip provider prefix tags like [RAW], [VIP], UK:, US:, etc.
     clean = clean.replace(/^\[(?:raw|vip|st|vavoo|dlv|sktech)\]\s*/i, '');
-    clean = clean.replace(/^(?:UK|US|USA|DE|FR|ES|IT|PL|TR|PT|NL|MY|IN|AU|CA)\s*:\s*/i, '');
+    clean = clean.replace(/^(?:UK|US|USA|DE|FR|ES|IT|PL|TR|PT|NL|MY|IN|AU|CA|NZ|AR|CL|BR)\s*:\s*/i, '');
 
-    // Strip bracketed metadata: (Backup), [Backup 1], (4K), (HD), (+1), (UK), (France), (EN), etc.
+    // Strip bracketed metadata: (Backup), [Backup 1], (4K), (HD), (+1), (UK), (France), (EN), (RAW), (MATCH TIME), (LOCAL), etc.
     clean = clean.replace(/\[\s*(?:backup(?:\s*\d+)?|bkp|alternate|alt)\s*\]/gi, ' ');
     clean = clean.replace(/\(\s*(?:backup(?:\s*\d+)?|bkp|alternate|alt)\s*\)/gi, ' ');
-    clean = clean.replace(/\[\s*(?:4k|uhd|fhd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps)\s*\]/gi, ' ');
-    clean = clean.replace(/\(\s*(?:4k|uhd|fhd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps)\s*\)/gi, ' ');
+    clean = clean.replace(/\[\s*(?:4k|uhd|fhd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps|raw|feed|local|match\s*time)\s*\]/gi, ' ');
+    clean = clean.replace(/\(\s*(?:4k|uhd|fhd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps|raw|feed|local|match\s*time)\s*\)/gi, ' ');
     clean = clean.replace(/\(\s*(?:\+\s*\d{1,2}|\btime\s*shift\b|\bdelay\b)\s*\)/gi, ' ');
-    clean = clean.replace(/\(\s*(?:uk|usa?|united\s*kingdom|united\s*states|france|germany|deutschland|italy|italia|spain|espana|portugal|poland|polska|netherlands|turkey|turkiye|albania|arabic|arab|malaysia|canada|australia|new\s*zealand|ireland|austria|switzerland|india|south\s*africa|latam|balkan)\s*\)/gi, ' ');
+    clean = clean.replace(/\(\s*(?:uk|usa?|united\s*kingdom|united\s*states|france|germany|deutschland|italy|italia|spain|espana|portugal|poland|polska|netherlands|turkey|turkiye|albania|arabic|arab|malaysia|canada|australia|new\s*zealand|ireland|austria|switzerland|india|south\s*africa|latam|balkan|argentina|chile|brazil|de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\s*\)/gi, ' ');
     clean = clean.replace(/\(\s*(?:en|eng|english|fr|fra|french|de|deu|ger|german|es|spa|spanish|it|ita|italian|pt|por|portuguese|pl|pol|polish|tr|tur|turkish|ar|ara|arabic|hi|hin|hindi|ru|rus|russian)\s*\)/gi, ' ');
 
-    // Strip quality labels outside brackets: 4K, UHD, FHD, 1080p, 720p, HD, SD, 50fps, etc.
-    clean = clean.replace(/\b(?:4k|uhd|fhd|full\s*hd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps)\b/gi, ' ');
+    // Strip quality, feed, and stream modifiers outside brackets
+    clean = clean.replace(/\b(?:4k|uhd|fhd|full\s*hd|1080p|720p|hd|sd|hevc|h\.?26[45]|50fps|60fps|raw|feed)\b/gi, ' ');
 
     // Strip timeshift labels outside brackets (+1, +2, +1 hr, Timeshift)
     clean = clean.replace(/(?:(?:\+|\bplus\s*)\d{1,2}\s*(?:hr|hour|h)?\b|\btime\s*shift\b|\bdelay\b)/gi, ' ');
@@ -226,19 +229,36 @@ class ChannelIdentityService {
     // Strip backup labels outside brackets
     clean = clean.replace(/\b(?:backup(?:\s*\d+)?|bkp|alternate|alt)\b/gi, ' ');
 
+    // Standardize known sports brand stems (sport -> Sports, e.g. TNT SPORT 1 -> TNT Sports 1)
+    clean = clean.replace(/\bcanal\s*(?:\+|\bplus\b)\s*sports?\b/gi, 'Canal+ Sport');
+    clean = clean.replace(/\bcanal\s*(?:\+|\bplus\b)/gi, 'Canal+');
+    clean = clean.replace(/\bmoto\s*gp\b/gi, 'MotoGP');
+    clean = clean.replace(/\bsuper\s*sports?\b/gi, 'SuperSport');
+    clean = clean.replace(/\beuro\s*sports?\b/gi, 'Eurosport');
+    clean = clean.replace(/\bskys?\s*ports?\b/gi, 'Sky Sports');
+    clean = clean.replace(/\b(tnt|bt|sky|bein|premier|dyn|arena|eleven|fox|cbs|nbc|polsat|astro|viaplay|dazn|tsn|flow|eir|ziggo|setanta|sony|star)\s+sports?\b/gi, (match, brand) => {
+      const bUpper = brand.toUpperCase();
+      const bName = UPPERCASE_TOKENS.has(bUpper) ? bUpper : (brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase());
+      return bName + ' Sports';
+    });
+
+    // Split glued digits from words (e.g. "Sky Bundesliga1" -> "Sky Bundesliga 1", "TNT1" -> "TNT 1")
+    // Guarded: preserves single-letter brand acronyms like F1, M6, A2, and French TF1
+    clean = clean.replace(/(?<=[a-zA-Z]{2,})(?<!\b(?:f|m|a|k|h|tf))(\d+)\b/gi, ' $1');
+
     // Strip trailing language qualifiers if substantive brand words remain (e.g. "Cartoon Network Arabic" -> "Cartoon Network")
     const langPattern = /\b(?:arabic|english|french|german|spanish|italian|portuguese|polish|turkish|hindi|russian|dutch)\b/gi;
     const testStrippedLang = clean.replace(langPattern, ' ').trim();
-    if (testStrippedLang.replace(/[^a-zA-Z]/g, '').length >= 4) {
+    if (testStrippedLang.replace(/[^a-zA-Z0-9]/g, '').length >= 2) {
       clean = testStrippedLang;
     }
 
     // Strip trailing or separated country qualifiers if substantive brand words remain
-    // e.g., "Astro Cricket Malaysia" -> "Astro Cricket", "Cartoonito UK" -> "Cartoonito", "Cartoonito France" -> "Cartoonito"
-    const countryPattern = /\b(?:uk|usa?|france|germany|italy|spain|portugal|poland|netherlands|turkey|albania|malaysia|canada|australia|austria|switzerland|india)\b/gi;
+    // e.g., "Astro Cricket Malaysia" -> "Astro Cricket", "Cartoonito UK" -> "Cartoonito", "M6 France" -> "M6"
+    const countryPattern = /\b(?:uk|usa?|france|germany|deutschland|italy|italia|spain|espana|portugal|poland|polska|netherlands|turkey|turkiye|albania|malaysia|canada|australia|austria|switzerland|india|argentina|chile|brazil|de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\b/gi;
     const testStrippedCountry = clean.replace(countryPattern, ' ').trim();
-    // Safety guard: only strip if at least 4 letters remain (so "France 2" or "Spain TV" won't lose "France" or "Spain")
-    if (testStrippedCountry.replace(/[^a-zA-Z]/g, '').length >= 4) {
+    // Safety guard: only strip if at least 2 alphanumeric characters remain (so "M6", "F1", "TF1" won't lose acronym, but "France 2" won't lose "France")
+    if (testStrippedCountry.replace(/[^a-zA-Z0-9]/g, '').length >= 2) {
       clean = testStrippedCountry;
     }
 
@@ -255,6 +275,9 @@ class ChannelIdentityService {
       if (UPPERCASE_TOKENS.has(upper)) return upper;
       if (/^bein$/i.test(word)) return 'beIN';
       if (/^canal\+?$/i.test(word)) return 'Canal+';
+      if (/^motogp$/i.test(word)) return 'MotoGP';
+      if (/^supersport$/i.test(word)) return 'SuperSport';
+      if (/^eurosport$/i.test(word)) return 'Eurosport';
       if (/[a-z][A-Z]/.test(word)) return word;
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     }).join(' ').trim();
@@ -268,9 +291,12 @@ class ChannelIdentityService {
     }
 
     // 8. Compute Deterministic Identity Key
-    // Lowercase alphanumeric only, e.g. "astrocricket", "astrocricket1", "cartoonito", "channel4"
+    // Lowercase alphanumeric only. Replace 'sports' with 'sport' so singular/plural brand mismatches
+    // (e.g. TNT SPORT 1 vs TNT Sports 1) produce the exact same key.
     const identityKey = canonicalTitle
       .toLowerCase()
+      .replace(/\bsports?\b/g, 'sport')
+      .replace(/sports/g, 'sport')
       .replace(/[^a-z0-9]+/g, '');
 
     return {

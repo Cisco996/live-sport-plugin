@@ -823,7 +823,7 @@ class DaddyLiveProvider extends BaseProvider {
             category: 'networks',
             date: '0',
             popular: '1',
-            league: 'Live TV',
+            league: ident.country || 'Live TV',
             logo: logoUrl || undefined,
             thumbnail_url: logoUrl || undefined,
             sources: [{
