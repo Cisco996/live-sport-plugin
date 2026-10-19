@@ -336,7 +336,7 @@ function sortCatalogMatches(matches, isReplayMode = false) {
       m,
       isLive: isMatchLive(m) ? 1 : 0,
       isReal: isRealFixture(m),
-      tier: getMatchTier(m),
+      tier: (m && m.category === 'networks') ? 99 : getMatchTier(m),
       pop: m && m.popular === '1' ? 1 : 0,
       kickoff: m && m.date ? getKickoff(m.date) : 0,
       idx: i,
@@ -1575,30 +1575,32 @@ async function handleCatalogUncached(type, id, extra, config) {
     if (tokens.length > 0) {
       filteredMatches = filteredMatches.filter(m => {
         const title = (m.title || '').toLowerCase();
-        const baseTitle = (m.baseTitle || '').toLowerCase();
-        const canonicalTitle = (m.canonicalTitle || '').toLowerCase();
         const league = (m.league || '').toLowerCase();
 
         // Fast path: direct substring match on title or league
         if (title.includes(searchRaw) || league.includes(searchRaw)) return true;
 
-        // Multi-token match: every token must be found in the match metadata or channel names
-        const sourceNames = (m.sources && Array.isArray(m.sources))
-          ? m.sources.map(s => `${s.channelName || ''} ${s.canonicalChannel || ''}`).join(' ').toLowerCase()
-          : '';
-        const haystack = `${title} ${baseTitle} ${canonicalTitle} ${league} ${sourceNames}`;
+        // Multi-token match: lazily memoized search haystack avoids repeated string join allocations
+        if (!m._searchHaystack) {
+          const baseTitle = (m.baseTitle || '').toLowerCase();
+          const canonicalTitle = (m.canonicalTitle || '').toLowerCase();
+          const sourceNames = (m.sources && Array.isArray(m.sources))
+            ? m.sources.map(s => `${s.channelName || ''} ${s.canonicalChannel || ''}`).join(' ').toLowerCase()
+            : '';
+          m._searchHaystack = `${title} ${baseTitle} ${canonicalTitle} ${league} ${sourceNames}`;
+        }
 
-        return tokens.every(tok => haystack.includes(tok));
+        return tokens.every(tok => m._searchHaystack.includes(tok));
       });
     }
   }
 
   // Support standard Stremio pagination via extra.skip
   const skip = extra && extra.skip ? Math.max(0, parseInt(extra.skip, 10) || 0) : 0;
-  // Cap large catalogs (like 24/7 Live TV with 900+ channels) to 100 items per page
-  // This avoids massive 750KB payloads that trigger timeouts or crash low-memory TV clients
+  // Cap large catalogs (including search results) to 100 items per page
+  // This avoids massive multi-megabyte payloads that trigger timeouts or crash low-memory TV clients
   const PAGE_SIZE = 100;
-  if (skip > 0 || (filteredMatches.length > PAGE_SIZE && !extra?.search)) {
+  if (skip > 0 || filteredMatches.length > PAGE_SIZE) {
     filteredMatches = filteredMatches.slice(skip, skip + PAGE_SIZE);
   }
 

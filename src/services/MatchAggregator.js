@@ -483,13 +483,17 @@ class MatchAggregator {
    * of inside every comparison removes ~50x of repeated work on large catalogs.
    */
   _precompute(e) {
-    const title = e && e.title ? _foldText(e.title) : '';
     const id = e && e.id != null ? String(e.id) : '';
+    const isChannel = Boolean(
+      (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) ||
+      id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_')
+    );
+    const title = e && e.title ? _foldText(e.title) : '';
     const normalized = _compoundify(_stripNoise(title));
-    const motorsportSeries = _extractMotorsportSeries(title, e && e.league);
-    const isMotorsport = (this._normalizeCategory(e && e.category) === 'motorsport') || motorsportSeries !== 'other';
-    const extractedTeams = isMotorsport ? null : _tryExtractTeams(title);
-    const fallbackTeams = (!extractedTeams && !isMotorsport && e && e.team1 && e.team2 && e.team1.name && e.team2.name)
+    const motorsportSeries = isChannel ? 'other' : _extractMotorsportSeries(title, e && e.league);
+    const isMotorsport = !isChannel && ((this._normalizeCategory(e && e.category) === 'motorsport') || motorsportSeries !== 'other');
+    const extractedTeams = (isMotorsport || isChannel) ? null : _tryExtractTeams(title);
+    const fallbackTeams = (!extractedTeams && !isMotorsport && !isChannel && e && e.team1 && e.team2 && e.team1.name && e.team2.name)
       ? [
           _tokenize(_compoundify(_stripNoise(_foldText(e.team1.name)))).join(' '),
           _tokenize(_compoundify(_stripNoise(_foldText(e.team2.name)))).join(' ')
@@ -502,6 +506,17 @@ class MatchAggregator {
       if (e) e.category = 'basketball';
     }
 
+    let channelIdentityKey = (e && e.channelIdentityKey) ? e.channelIdentityKey : null;
+    let channelNumber = (e && e.channelNumber !== undefined && e.channelNumber !== null) ? e.channelNumber : null;
+    let canonicalTitle = (e && e.canonicalTitle) ? e.canonicalTitle : null;
+
+    if (isChannel && (!channelIdentityKey || !canonicalTitle)) {
+      const parsed = ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) });
+      if (!channelIdentityKey) channelIdentityKey = parsed.identityKey;
+      if (channelNumber === null) channelNumber = parsed.channelNumber;
+      if (!canonicalTitle) canonicalTitle = parsed.canonicalTitle;
+    }
+
     return {
       id,
       category: rawCategory,
@@ -510,35 +525,23 @@ class MatchAggregator {
       tokens: new Set(_tokenize(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
       norm: normalized.replace(/\s+/g, ' ').trim(),
       motorsportSeries,
-      motorsportSession: _extractMotorsportSession(title),
+      motorsportSession: isChannel ? 'race' : _extractMotorsportSession(title),
       // Extract digits from the NORMALIZED form so compound tokens like
       // "formulaone" don't leave a stray "1". Strip 4-digit calendar years
       // and day numbers following month names (e.g. October 15) so date
       // metadata does not act as a channel-number collision blocker.
-      digits: (normalized
+      digits: isChannel ? '' : (normalized
         .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b/gi, ' ')
         .match(/\d+/g) || [])
         .filter(d => { const n = Number(d); return !(n >= 2000 && n <= 2100); })
         .sort()
         .join(','),
       status: e && e.status ? String(e.status) : '',
-      isReplay: (e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'),
-      isChannel: (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'),
-      channelIdentityKey: (e && e.channelIdentityKey) ? e.channelIdentityKey : (
-        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
-          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).identityKey
-          : null
-      ),
-      channelNumber: (e && e.channelNumber !== undefined && e.channelNumber !== null) ? e.channelNumber : (
-        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
-          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).channelNumber
-          : null
-      ),
-      canonicalTitle: (e && e.canonicalTitle) ? e.canonicalTitle : (
-        ((e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) || id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_'))
-          ? ChannelIdentityService.parseChannel(title, { group: e && (e.group || e.league) }).canonicalTitle
-          : null
-      ),
+      isReplay: !isChannel && ((e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_')),
+      isChannel,
+      channelIdentityKey,
+      channelNumber,
+      canonicalTitle,
       league: e && e.league ? String(e.league).toLowerCase().trim() : '',
       group: (e && e.sources && e.sources[0] && (e.sources[0].group || e.sources[0].country))
         ? String(e.sources[0].group || e.sources[0].country).toLowerCase().trim()
@@ -564,7 +567,8 @@ class MatchAggregator {
     if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
     if (['mlb', 'npb'].includes(lc)) return 'baseball';
     if (['nhl', 'khl', 'ice hockey', 'ice_hockey', 'icehockey'].includes(lc)) return 'hockey';
-    if (['sports', 'sport', 'networks'].includes(lc)) return 'other';
+    if (lc === 'networks') return 'networks';
+    if (['sports', 'sport'].includes(lc)) return 'other';
     return lc;
   }
 
@@ -862,15 +866,17 @@ class MatchAggregator {
         }
 
         // 2. Fast O(1) Channel Lookup
-        // For continuous 24/7 network channels (no dual teams), channel identity
-        // requires strict normalized title match or universal channel identity key. Lookup directly in O(1).
-        if (idx === -1 && pre.isChannel && !pre.teams) {
-          const chKey = pre.channelIdentityKey || pre.norm;
-          if (chKey && channelNormIndex.has(chKey)) {
-            const candidateIdx = channelNormIndex.get(chKey);
-            if (this._sameEventPre(finalPres[candidateIdx], pre)) {
-              idx = candidateIdx;
-            }
+        // For continuous 24/7 network channels, channel identity requires universal channel identity key
+        // or normalized title match (pre.norm). Lookup directly in O(1).
+        if (idx === -1 && pre.isChannel) {
+          let candidateIdx = -1;
+          if (pre.channelIdentityKey && channelNormIndex.has(pre.channelIdentityKey)) {
+            candidateIdx = channelNormIndex.get(pre.channelIdentityKey);
+          } else if (pre.norm && channelNormIndex.has(pre.norm)) {
+            candidateIdx = channelNormIndex.get(pre.norm);
+          }
+          if (candidateIdx !== -1 && this._sameEventPre(finalPres[candidateIdx], pre)) {
+            idx = candidateIdx;
           }
         }
 
@@ -909,8 +915,9 @@ class MatchAggregator {
         }
 
         // 4. Narrow Category Bucket Fallback
-        // Handles unindexed edge-cases (single generic word titles or motorsport races without teams)
-        if (idx === -1) {
+        // Handles unindexed edge-cases (single generic word titles or motorsport races without teams).
+        // 24/7 continuous TV channels are indexed strictly in O(1) channelNormIndex and NEVER fall through to linear scans.
+        if (idx === -1 && !pre.isChannel) {
           const c2 = this._normalizeCategory(pre.category);
           const rawCat2 = (pre.category || '').toLowerCase();
           const isCollegeFootball2 = rawCat2 === 'college' || c2 === 'american_football' || c2 === 'football';
@@ -919,6 +926,7 @@ class MatchAggregator {
             // 'other' cross-matches with date window guard
             for (let i = finalMatches.length - 1; i >= 0; i--) {
               const pCand = finalPres[i];
+              if (pCand.isChannel) continue;
               const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
               if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
               if (this._sameEventPre(pCand, pre)) { idx = i; break; }
@@ -938,6 +946,7 @@ class MatchAggregator {
                 if (checkedIndices.has(i)) continue;
                 checkedIndices.add(i);
                 const pCand = finalPres[i];
+                if (pCand.isChannel) continue;
                 const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
                 if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
                 if (this._sameEventPre(pCand, pre)) {
@@ -967,10 +976,12 @@ class MatchAggregator {
           }
 
           // Register in O(1) Channel Index
-          if (pre.isChannel && !pre.teams) {
-            const chKey = pre.channelIdentityKey || pre.norm;
-            if (chKey) {
-              channelNormIndex.set(chKey, newIdx);
+          if (pre.isChannel) {
+            if (pre.channelIdentityKey) {
+              channelNormIndex.set(pre.channelIdentityKey, newIdx);
+            }
+            if (pre.norm) {
+              channelNormIndex.set(pre.norm, newIdx);
             }
           }
 
@@ -1083,6 +1094,12 @@ class MatchAggregator {
           }
           if (!existing.channelIdentityKey && pre.channelIdentityKey) existing.channelIdentityKey = pre.channelIdentityKey;
           if (!existing.channelNumber && pre.channelNumber) existing.channelNumber = pre.channelNumber;
+          if (pre.channelIdentityKey && !channelNormIndex.has(pre.channelIdentityKey)) {
+            channelNormIndex.set(pre.channelIdentityKey, idx);
+          }
+          if (pre.norm && !channelNormIndex.has(pre.norm)) {
+            channelNormIndex.set(pre.norm, idx);
+          }
         }
         }
         if (end < providerMatches.length) await yieldToLoop();

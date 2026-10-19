@@ -107,7 +107,17 @@ const UPPERCASE_TOKENS = new Set([
   'RTE', 'NPO', 'TVP', 'PPV'
 ]);
 
+const _channelParseCache = new Map();
+const MAX_CHANNEL_CACHE = 5000;
+
 class ChannelIdentityService {
+  /**
+   * Clears the parseChannel memoization cache.
+   */
+  static clearCache() {
+    _channelParseCache.clear();
+  }
+
   /**
    * Parses raw channel name and returns normalized identity and extracted attributes
    * @param {string} rawName 
@@ -141,6 +151,11 @@ class ChannelIdentityService {
         isTimeshift: false
       };
     }
+
+    const groupKey = (meta && (meta.group || meta.league || meta.country)) || '';
+    const cacheKey = `${raw}|${groupKey}|${(meta && meta.language) || ''}|${Boolean(meta && meta.isBackup)}|${Boolean(meta && meta.isTimeshift)}|${Boolean(meta && meta.is4k)}|${(meta && meta.resolution) || ''}`;
+    const cached = _channelParseCache.get(cacheKey);
+    if (cached) return cached;
 
     // 1. Detect Backup Feed
     const isBackup = Boolean(
@@ -305,7 +320,7 @@ class ChannelIdentityService {
       .replace(/sports/g, 'sport')
       .replace(/[^a-z0-9]+/g, '');
 
-    return {
+    const result = {
       canonicalTitle: canonicalTitle || raw,
       identityKey: identityKey || 'unknown',
       channelNumber,
@@ -317,6 +332,14 @@ class ChannelIdentityService {
       isBackup,
       isTimeshift
     };
+
+    if (_channelParseCache.size >= MAX_CHANNEL_CACHE) {
+      const oldestKey = _channelParseCache.keys().next().value;
+      _channelParseCache.delete(oldestKey);
+    }
+    _channelParseCache.set(cacheKey, result);
+
+    return result;
   }
 }
 
