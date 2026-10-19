@@ -249,17 +249,15 @@ class ChannelIdentityService {
       .trim();
 
     // 6. Format Canonical Display Title (Title Casing while preserving acronyms)
-    let canonicalTitle = clean;
-    if (/^[A-Z0-9\s+.]+$/.test(clean) || /^[a-z0-9\s+.]+$/.test(clean)) {
-      canonicalTitle = clean.split(' ').map((word) => {
-        if (!word) return '';
-        const upper = word.toUpperCase();
-        if (UPPERCASE_TOKENS.has(upper)) return upper;
-        if (/^bein$/i.test(word)) return 'beIN';
-        if (/^canal\+?$/i.test(word)) return 'Canal+';
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      }).join(' ').trim();
-    }
+    let canonicalTitle = clean.split(' ').map((word) => {
+      if (!word) return '';
+      const upper = word.toUpperCase();
+      if (UPPERCASE_TOKENS.has(upper)) return upper;
+      if (/^bein$/i.test(word)) return 'beIN';
+      if (/^canal\+?$/i.test(word)) return 'Canal+';
+      if (/[a-z][A-Z]/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ').trim();
 
     // 7. Extract Channel Number (Strict Isolation)
     // Preserves numbers like in "Astro Cricket 1", "Astro Cricket 2", "beIN Sports 1", "DAZN 2"

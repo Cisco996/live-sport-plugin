@@ -1195,13 +1195,20 @@ async function handleStream(type, id, config) {
     }
     
     let countryTag = '';
+    let countryInfo = null;
     if (channelName) {
       channelName = channelName.trim();
-      const countryInfo = detectChannelCountry(channelName);
+      countryInfo = detectChannelCountry(channelName);
       if (countryInfo) {
         countryTag = ` ${countryInfo.flag} [${countryInfo.name} • ${countryInfo.language}]`;
         s.language = countryInfo.language;
         s.country = countryInfo.name;
+      }
+    }
+    if (!countryInfo) {
+      const fallbackChannel = s.canonicalChannel || s.channelName || (match && match.title) || '';
+      if (fallbackChannel) {
+        countryInfo = detectChannelCountry(fallbackChannel);
       }
     }
     

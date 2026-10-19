@@ -43,7 +43,9 @@ class CacheService {
     // memo) key off this so a new sync invalidates everything at once.
     this.rev = 0;
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    this.cacheFilePath = customCachePath || resolveCacheFile();
+    this.cacheFilePath = (typeof customCachePath === 'string' && customCachePath)
+      ? customCachePath
+      : resolveCacheFile();
     this._byId = new Map();
     this._byAlias = new Map();
     this._bySourceId = new Map();
