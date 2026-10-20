@@ -127,7 +127,8 @@ class EmbedStProvider extends BaseProvider {
     }
 
     // ─── Tier 1: Native WASM decryption ─────────────────────────────────────
-    if (streams.length === 0) {
+    const enableWasm = process.env.ENABLE_WASM === 'true';
+    if (enableWasm && streams.length === 0) {
       try {
         // Parse the user, event, id from targetEmbedUrl: https://embed.st/embed/admin/ppv-celtic-vs-lask-linz/1
         const parts = targetEmbedUrl.split('#')[0].replace(/\/+$/, '').split('/').filter(Boolean);
