@@ -444,26 +444,59 @@ class MatchAggregator {
       if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
 
+      // Extract candidate broadcaster names from all sources
+      const candidateNames = [];
+      for (const src of match.sources) {
+        if (!src) continue;
+        const candidateName = src.channelName || src.channel_name || src.channel;
+        if (candidateName && typeof candidateName === 'string' && candidateName.trim()) {
+          candidateNames.push(candidateName.trim());
+        }
+      }
+
+      // Check if this fixture has specific event/overflow channels (e.g., Canal+ Live 3, Canal+ Extra 2)
+      const hasCanalOverflow = candidateNames.some(c => /canal\+?\s*(live|extra)\s*\d+/i.test(c));
+      const hasMovistarOverflow = candidateNames.some(c => /movistar\s*(liga|deportes|campeones)\s*\d+/i.test(c));
+
+      // If specific overflow channels exist, prune any linear channels that were mistakenly added
+      if (hasCanalOverflow) {
+        match.sources = match.sources.filter(s => {
+          if (s && s.source === 'vavoo') {
+            const chName = String(s.channelName || '').toLowerCase();
+            if (chName.includes('canal') && (chName.includes('sport') || chName.includes('premiere')) && !chName.includes('live') && !chName.includes('extra')) {
+              return false;
+            }
+          }
+          return true;
+        });
+      }
+
       const existingVavooUrls = new Set(
         match.sources
           .filter(s => s && s.source === 'vavoo')
           .map(s => s.id)
       );
 
-      const sourcesToScan = [...match.sources];
+      // Prioritize numbered event feeds and filter out conflicting generic network channels
+      const prioritizedCandidates = candidateNames.filter(c => {
+        if (hasCanalOverflow && /canal\+?\s*(sport|premiere?)/i.test(c) && !/(live|extra)/i.test(c)) {
+          return false;
+        }
+        if (hasMovistarOverflow && /movistar\s*(plus|\+)/i.test(c) && !/(liga|deportes|campeones)/i.test(c)) {
+          return false;
+        }
+        return true;
+      });
+
       let injectedForThisMatch = 0;
 
-      for (const src of sourcesToScan) {
-        if (!src) continue;
-        const candidateName = src.channelName || src.channel_name || src.channel;
-        if (!candidateName || typeof candidateName !== 'string') continue;
-
+      for (const candidateName of prioritizedCandidates) {
         const vavooSource = this.broadcasterMatchService.createVavooSource(candidateName);
         if (vavooSource && vavooSource.id && !existingVavooUrls.has(vavooSource.id)) {
           existingVavooUrls.add(vavooSource.id);
           match.sources.push(vavooSource);
           injectedForThisMatch++;
-          if (injectedForThisMatch >= 4) break; // Limit to top 4 broadcast feeds per match
+          if (injectedForThisMatch >= 8) break; // Allow up to 8 broadcast feeds per match across regions
         }
       }
 

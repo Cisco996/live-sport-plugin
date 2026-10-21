@@ -67582,5 +67582,21 @@
     "language": "en",
     "is4k": false,
     "vavooUrl": "https://vavoo.to/vavoo-iptv/play/3932296459f1fcd5487b00"
+  },
+  {
+    "id": "canal-live-9-france",
+    "name": "CANAL+ LIVE 9",
+    "group": "France",
+    "language": "fr",
+    "is4k": false,
+    "vavooUrl": "https://vavoo.to/vavoo-iptv/play/34703176652da9efa5d915"
+  },
+  {
+    "id": "canal-extra-7-poland",
+    "name": "CANAL+ EXTRA 7",
+    "group": "Poland",
+    "language": "pl",
+    "is4k": false,
+    "vavooUrl": "https://vavoo.to/vavoo-iptv/play/2027920268a335c6eaa87b"
   }
 ]
