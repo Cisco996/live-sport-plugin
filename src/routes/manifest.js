@@ -21,8 +21,14 @@ const { getRequestBaseUrl } = require('../config');
 
 router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
-  const referer = req.query.referer || 'https://embed.st/';
-  const origin = req.query.origin || 'https://embed.st';
+  const isVavooTarget = Boolean(
+    (targetUrl && (targetUrl.includes('/sunshine/') || targetUrl.includes('vavoo.') || targetUrl.includes(':8008'))) ||
+    (req.query.referer && req.query.referer.includes('vavoo.'))
+  );
+  const defaultReferer = isVavooTarget ? 'https://vavoo.to/' : 'https://embed.st/';
+  const defaultOrigin = isVavooTarget ? 'https://vavoo.to' : 'https://embed.st';
+  const referer = req.query.referer || defaultReferer;
+  const origin = req.query.origin || defaultOrigin;
 
   if (!targetUrl) return res.status(400).send('Missing url');
   if (targetUrl.includes('.mpd')) return handleDashManifestProxy(req, res);

@@ -793,6 +793,26 @@ async function settleBefore(promise, timeoutMs, fallback) {
  * @param {Array<Object>} streams - Stremio stream objects with `name` / `title` fields
  * @returns {Array<Object>}
  */
+function getVavooClusterKey(s) {
+  if (!s) return 'main';
+  if (s.cluster) return String(s.cluster).toLowerCase();
+  if (s.serverCluster) {
+    const sc = String(s.serverCluster).toLowerCase();
+    if (sc.includes('server c') || sc === 'c') return 'c';
+    if (sc.includes('server b') || sc === 'b') return 'b';
+    if (sc.includes('hevc')) return 'hevc';
+    if (sc.includes('raw')) return 'raw';
+    if (sc.includes('backup')) return 'backup';
+    return sc;
+  }
+  const text = `${s.title || ''} ${s.channelName || ''} ${s.name || ''} ${s._streamSource || ''}`.toLowerCase();
+  if (/server\s*c|\.c\b/i.test(text)) return 'c';
+  if (/server\s*b|\.b\b/i.test(text)) return 'b';
+  if (/\bhevc\b|\bh265\b/i.test(text)) return 'hevc';
+  if (/\braw\b/i.test(text)) return 'raw';
+  return 'main';
+}
+
 function deduplicateResolutions(streams) {
   const streamGroupMap = new Map();
   const dedupedStreams = [];
@@ -850,7 +870,8 @@ function deduplicateResolutions(streams) {
       // (e.g. TNT SPORT 1 vs TNT SPORTS 1 vs TNT SPORTS 1 HD) produce the exact same identity key
       const channelIdent = ChannelIdentityService.parseChannel(s.channelName || s.canonicalChannel || s.title || '');
       const channelKey = channelIdent.identityKey || 'vavoo_channel';
-      const baseKey = `vavoo:${channelKey}:${resTag}:${lang}`;
+      const clusterKey = getVavooClusterKey(s);
+      const baseKey = `vavoo:${channelKey}:${resTag}:${clusterKey}:${lang}`;
 
       if (streamGroupMap.has(baseKey)) {
         const existing = streamGroupMap.get(baseKey);
@@ -1300,16 +1321,16 @@ async function handleStream(type, id, config) {
     }
 
     let serverBadge = '';
-    const rawServer = s._streamSource || s.streamSource;
+    const rawServer = s.serverCluster || s._streamSource || s.streamSource;
     if (rawServer && typeof rawServer === 'string') {
       const trimmed = rawServer.trim();
       if (trimmed) {
-        serverBadge = ` [${trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase()}]`;
+        serverBadge = ` [${trimmed}]`;
       }
     }
 
     const isBackup = Boolean(s.isBackup || s._isBackup || (s.title && /\bbackup\b/i.test(s.title)) || (originalTitle && /\bbackup\b/i.test(originalTitle)));
-    const backupTag = isBackup ? ' [Backup]' : '';
+    const backupTag = (isBackup && !serverBadge.toLowerCase().includes('backup')) ? ' [Backup]' : '';
     const isTimeshift = Boolean(s.isTimeshift || s._isTimeshift || (s.title && /(?:\+1|\bdelay\b)/i.test(s.title)) || (originalTitle && /(?:\+1|\bdelay\b)/i.test(originalTitle)));
     const timeshiftTag = isTimeshift ? ' [+1 Delay]' : '';
 

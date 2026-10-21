@@ -86,10 +86,18 @@ function playlistHasContent(text) {
 // Fetch + validate the upstream manifest. Throws on failure so coalesced
 // waiters share the same outcome; successful bodies are cached by the caller.
 async function fetchUpstreamManifest(targetUrl, referer, origin) {
+  const isVavoo = Boolean(
+    (targetUrl && (targetUrl.includes('/sunshine/') || targetUrl.includes('vavoo.') || targetUrl.includes(':8008'))) ||
+    (referer && referer.includes('vavoo.'))
+  );
+  const userAgent = isVavoo
+    ? 'MediaHubMX/2'
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+
   const headers = {
-    'Referer': referer,
-    'Origin': origin,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+    'Referer': referer || (isVavoo ? 'https://vavoo.to/' : 'https://embed.st/'),
+    'Origin': origin || (isVavoo ? 'https://vavoo.to' : 'https://embed.st'),
+    'User-Agent': userAgent
   };
   // _safeFetch: impit (browser TLS fingerprint) with automatic undici fallback.
   // A hard 10 s timeout ensures a hung upstream can never hold the viewer's poll.
