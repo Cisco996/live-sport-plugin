@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -14,6 +15,11 @@ const PLAYLIST_FEEDS = [
   'https://fawasp.pages.dev/playlist.txt',
   'https://axsp.pages.dev/playlist.txt'
 ];
+
+const EVENTS_URL = 'https://hellobabu.xyz/events.txt';
+const AK47_BASE_URL = 'https://hellobabu.xyz';
+const AK47_KEY = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+const AK47_IV = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
 
 class Ak47LiveProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -37,6 +43,30 @@ class Ak47LiveProvider extends BaseProvider {
       return 'football';
     }
     return super.normalizeCategory(cat);
+  }
+
+  /**
+   * Decrypts obfuscated AK47 payloads (events.txt, pro/*.txt).
+   * Reverses base64 encoding with adjacent byte pair swapping, then performs AES-128-CBC.
+   */
+  _decryptAk47Payload(rawBase64) {
+    if (!rawBase64 || typeof rawBase64 !== 'string') return null;
+    try {
+      const b1 = Buffer.from(rawBase64.trim(), 'base64');
+      for (let i = 0; i < b1.length - 1; i += 2) {
+        const tmp = b1[i];
+        b1[i] = b1[i + 1];
+        b1[i + 1] = tmp;
+      }
+      b1.reverse();
+      const ciphertext = Buffer.from(b1.toString('ascii'), 'base64');
+      const decipher = crypto.createDecipheriv('aes-128-cbc', AK47_KEY, AK47_IV);
+      decipher.setAutoPadding(true);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return JSON.parse(decrypted.toString('utf8'));
+    } catch (_) {
+      return null;
+    }
   }
 
   /**
@@ -179,7 +209,7 @@ class Ak47LiveProvider extends BaseProvider {
   }
 
   /**
-   * Ingests and aggregates live matches from AK47 playlists.
+   * Ingests and aggregates live matches from AK47 encrypted events and M3U playlists.
    * Deduplicates multiple stream channels under single MatchEntity cards.
    */
   async getMatches() {
@@ -190,6 +220,86 @@ class Ak47LiveProvider extends BaseProvider {
 
     const matchesMap = new Map();
 
+    // 1. Ingest Decrypted Events Feed from hellobabu.xyz/events.txt
+    try {
+      const res = await this.proxyFetch(EVENTS_URL, {
+        headers: { 'User-Agent': 'okhttp/4.9.2' },
+        timeoutMs: 8000,
+        attempts: 2
+      });
+      if (res && res.status === 200) {
+        const rawBody = await res.text();
+        const events = this._decryptAk47Payload(rawBody);
+        if (Array.isArray(events)) {
+          for (const item of events) {
+            const evStr = item.event;
+            const ev = typeof evStr === 'string' ? JSON.parse(evStr) : evStr;
+            if (!ev || !ev.teamAName || !ev.teamBName) continue;
+
+            const team1 = ev.teamAName.trim();
+            const team2 = ev.teamBName.trim();
+            const title = `${team1} vs ${team2}`;
+            const category = this.normalizeCategory(ev.category || 'Football');
+            const league = ev.eventName ? ev.eventName.trim() : '';
+            const matchSlug = this.normalizeStr(title) || 'match';
+            const matchId = `ak47_${matchSlug.replace(/\s+/g, '_')}`;
+
+            const linkNames = Array.isArray(ev.link_names) ? ev.link_names : [];
+            const linksPath = ev.links || '';
+
+            const sources = [];
+            if (linkNames.length > 0 && linksPath) {
+              linkNames.forEach((name, idx) => {
+                sources.push({
+                  source: 'ak47live',
+                  id: `${linksPath}#${idx}`,
+                  channelName: name.trim(),
+                  linksPath,
+                  streamIndex: idx,
+                  type: 'live'
+                });
+              });
+            } else if (linksPath) {
+              sources.push({
+                source: 'ak47live',
+                id: linksPath,
+                channelName: 'HD',
+                linksPath,
+                streamIndex: 0,
+                type: 'live'
+              });
+            }
+
+            if (matchesMap.has(matchId)) {
+              const existing = matchesMap.get(matchId);
+              for (const src of sources) {
+                const hasSrc = existing.sources.some(s => s.id === src.id);
+                if (!hasSrc) existing.sources.push(src);
+              }
+            } else {
+              const match = new MatchEntity({
+                id: matchId,
+                title,
+                category,
+                league,
+                date: now.toString(),
+                status: 'LIVE',
+                team1: { name: team1 },
+                team2: { name: team2 },
+                thumbnail_url: ev.eventLogo || ev.teamAFlag || '',
+                poster: '',
+                sources
+              });
+              matchesMap.set(matchId, match);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[${this.name}] Events fetch failed: ${err.message}`);
+    }
+
+    // 2. Ingest Playlist Feeds (fawasp / axsp)
     await Promise.all(
       PLAYLIST_FEEDS.map(async (feedUrl) => {
         try {
@@ -206,7 +316,6 @@ class Ak47LiveProvider extends BaseProvider {
           for (const entry of entries) {
             const { title, channelLabel, team1, team2, category } = this._extractMatchInfo(entry.rawTitle, entry.groupTitle);
 
-            // Canonical slug for grouping multi-channel mirrors
             const matchSlug = this.normalizeStr(title) || 'match';
             const matchId = `ak47_${matchSlug.replace(/\s+/g, '_')}`;
 
@@ -222,7 +331,6 @@ class Ak47LiveProvider extends BaseProvider {
 
             if (matchesMap.has(matchId)) {
               const existing = matchesMap.get(matchId);
-              // Avoid duplicate identical stream URLs
               const hasUrl = existing.sources.some(s => s.id === entry.streamUrl);
               if (!hasUrl) {
                 existing.sources.push(sourceObj);
@@ -261,7 +369,78 @@ class Ak47LiveProvider extends BaseProvider {
    * Resolves a stream source into a playable StreamEntity with proxy headers.
    */
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
-    const streamUrl = src.id || sourceId;
+    let streamUrl = src.id || sourceId;
+    let referer = src.referer || DEFAULT_REFERER;
+    let origin = src.origin || DEFAULT_ORIGIN;
+    let userAgent = src.userAgent || DEFAULT_UA;
+    let channelLabel = src.channelName || 'HD';
+
+    // If source points to encrypted pro/*.txt feed:
+    if (src.linksPath || (typeof streamUrl === 'string' && streamUrl.startsWith('pro/'))) {
+      const linksPath = src.linksPath || streamUrl.split('#')[0];
+      const targetIdx = src.streamIndex !== undefined ? src.streamIndex : 0;
+      try {
+        const proUrl = `${AK47_BASE_URL}/${linksPath}`;
+        const res = await this.proxyFetch(proUrl, {
+          headers: { 'User-Agent': 'okhttp/4.9.2' },
+          timeoutMs: 6000,
+          attempts: 2
+        });
+        if (res && res.status === 200) {
+          const raw = await res.text();
+          const streams = this._decryptAk47Payload(raw);
+          if (Array.isArray(streams) && streams.length > 0) {
+            let selected = streams[targetIdx] || streams.find(s => s.name && s.name.trim() === channelLabel) || streams[0];
+            if (selected) {
+              channelLabel = selected.name ? selected.name.trim() : channelLabel;
+              if (selected.link) {
+                const parts = selected.link.split('|');
+                streamUrl = parts[0].trim();
+                if (parts.length > 1) {
+                  const headerPairs = parts.slice(1).join('|').split('&');
+                  for (const pair of headerPairs) {
+                    const eqIdx = pair.indexOf('=');
+                    if (eqIdx !== -1) {
+                      const k = pair.substring(0, eqIdx).trim().toLowerCase();
+                      const v = pair.substring(eqIdx + 1).trim();
+                      if (k === 'referer' || k === 'http-referrer') referer = v;
+                      else if (k === 'origin' || k === 'http-origin') origin = v;
+                      else if (k === 'user-agent' || k === 'http-user-agent') userAgent = v;
+                    }
+                  }
+                }
+              } else if (selected.tokenApi) {
+                try {
+                  const tokenObj = typeof selected.tokenApi === 'string' ? JSON.parse(selected.tokenApi) : selected.tokenApi;
+                  if (tokenObj && tokenObj.api) {
+                    const tokenRes = await this.proxyFetch(tokenObj.api, {
+                      headers: { 'User-Agent': DEFAULT_UA, 'Referer': 'https://hellobabu.xyz/' },
+                      timeoutMs: 5000,
+                      attempts: 2
+                    });
+                    if (tokenRes && tokenRes.status === 200) {
+                      const tokenBody = await tokenRes.text();
+                      let directLink = '';
+                      try {
+                        const parsedJson = JSON.parse(tokenBody);
+                        directLink = parsedJson.playback_url || parsedJson.url || '';
+                      } catch (_) {
+                        const matchHls = tokenBody.match(/hlsManifestUrl":"([^"]+)"/);
+                        if (matchHls) directLink = matchHls[1];
+                      }
+                      if (directLink) streamUrl = directLink;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[${this.name}] Pro stream resolve failed for ${linksPath}: ${err.message}`);
+      }
+    }
+
     if (!streamUrl || typeof streamUrl !== 'string' || !streamUrl.startsWith('http')) {
       return [];
     }
@@ -271,11 +450,6 @@ class Ak47LiveProvider extends BaseProvider {
       console.warn(`[${this.name}] Dropped DASH stream: ${streamUrl}`);
       return [];
     }
-
-    const referer = src.referer || DEFAULT_REFERER;
-    const origin = src.origin || DEFAULT_ORIGIN;
-    const userAgent = src.userAgent || DEFAULT_UA;
-    const channelLabel = src.channelName || 'HD';
 
     const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
 

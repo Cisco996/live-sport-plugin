@@ -2,6 +2,7 @@
 
 process.env.NODE_ENV = 'test';
 
+const crypto = require('crypto');
 const Ak47LiveProvider = require('../src/providers/Ak47LiveProvider');
 const MatchEntity = require('../src/domain/MatchEntity');
 const StreamEntity = require('../src/domain/StreamEntity');
@@ -12,6 +13,39 @@ describe('Ak47LiveProvider Unit & Integration Tests', () => {
 
   beforeEach(() => {
     provider = new Ak47LiveProvider({ cacheTtlMs: 5000 });
+  });
+
+  describe('AK47 Obfuscation Decryption Engine', () => {
+    test('successfully decrypts double-base64 pair-swapped AES-128-CBC payloads', () => {
+      const payload = {
+        name: 'Test Stream',
+        url: 'https://example.com/live.m3u8'
+      };
+
+      // Encrypt with AK47 scheme: JSON -> AES-128-CBC -> Base64 -> Reverse -> Pair Swap -> Base64
+      const key = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+      const iv = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
+      const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+      cipher.setAutoPadding(true);
+      const encrypted = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(payload), 'utf8')), cipher.final()]);
+
+      const b64_inner = encrypted.toString('base64');
+      const rev = Buffer.from(b64_inner, 'ascii').reverse();
+      for (let i = 0; i < rev.length - 1; i += 2) {
+        const tmp = rev[i];
+        rev[i] = rev[i + 1];
+        rev[i + 1] = tmp;
+      }
+      const rawEncryptedPayload = rev.toString('base64');
+
+      const decrypted = provider._decryptAk47Payload(rawEncryptedPayload);
+      expect(decrypted).toEqual(payload);
+    });
+
+    test('returns null for corrupted or invalid payload', () => {
+      expect(provider._decryptAk47Payload('')).toBeNull();
+      expect(provider._decryptAk47Payload('invalid-base64-content')).toBeNull();
+    });
   });
 
   describe('Strict Zero-DASH Enforcement & M3U Parser', () => {
@@ -122,10 +156,15 @@ http://193.47.62.1:8080/live/ch1.m3u8
 http://193.47.62.2:8080/live/ch2.m3u8
       `;
 
-      jest.spyOn(provider, 'proxyFetch').mockImplementation(async () => ({
-        status: 200,
-        text: async () => mockFeed
-      }));
+      jest.spyOn(provider, 'proxyFetch').mockImplementation(async (url) => {
+        if (url.includes('events.txt')) {
+          return { status: 404, text: async () => '' };
+        }
+        return {
+          status: 200,
+          text: async () => mockFeed
+        };
+      });
 
       const matches = await provider.getMatches();
       expect(matches.length).toBe(1);
@@ -157,7 +196,7 @@ http://193.47.62.1:8080/live/game.m3u8
       const second = await provider.getMatches();
 
       expect(first).toBe(second); // same object reference
-      expect(spy).toHaveBeenCalledTimes(2); // 2 playlist feeds fetched on initial call
+      expect(spy).toHaveBeenCalledTimes(3); // 1 encrypted events feed + 2 playlist feeds fetched on initial call
     });
 
     test('handles upstream feed fetch failure gracefully', async () => {
@@ -207,6 +246,48 @@ http://193.47.62.1:8080/live/game.m3u8
     test('returns empty array for invalid stream URLs', async () => {
       const resolved = await provider.resolveStream('', 'football', 'Match');
       expect(resolved).toEqual([]);
+    });
+
+    test('resolves encrypted pro/*.txt streams and extracts piped headers', async () => {
+      const mockStreams = [
+        {
+          name: 'SonyLiv (Asia)',
+          link: 'https://sonymtmnew.akamaized.net/live/index.m3u8|Referer=https://www.sonyliv.com/&Origin=https://www.sonyliv.com'
+        }
+      ];
+
+      // Encrypt mockStreams using AK47 cipher
+      const key = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+      const iv = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
+      const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+      cipher.setAutoPadding(true);
+      const enc = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(mockStreams), 'utf8')), cipher.final()]);
+      const b64 = enc.toString('base64');
+      const rev = Buffer.from(b64, 'ascii').reverse();
+      for (let i = 0; i < rev.length - 1; i += 2) {
+        const tmp = rev[i];
+        rev[i] = rev[i + 1];
+        rev[i + 1] = tmp;
+      }
+      const encryptedPro = rev.toString('base64');
+
+      jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+        status: 200,
+        text: async () => encryptedPro
+      });
+
+      const src = {
+        id: 'pro/mock123.txt#0',
+        linksPath: 'pro/mock123.txt',
+        streamIndex: 0,
+        channelName: 'SonyLiv (Asia)'
+      };
+
+      const resolved = await provider.resolveStream(src.id, 'football', 'Real Sociedad vs Lillestrom', src);
+      expect(resolved.length).toBe(1);
+      expect(resolved[0].title).toContain('SonyLiv (Asia)');
+      expect(resolved[0].behaviorHints.proxyHeaders.request['Referer']).toBe('https://www.sonyliv.com/');
+      expect(resolved[0].behaviorHints.proxyHeaders.request['Origin']).toBe('https://www.sonyliv.com');
     });
   });
 

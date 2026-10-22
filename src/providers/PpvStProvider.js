@@ -134,7 +134,7 @@ class PpvStProvider extends BaseProvider {
           const isTikTokStream = Boolean(/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(m3u8Url) || /admin|strmd\.st|\.image|tiktokcdn/i.test(embedUrl));
           const s = new StreamEntity({
             name: 'PpvSt',
-            title: `PpvSt${langStr}${chanStr} (${matchTitle || channelId})`,
+            title: `PpvSt${langStr}${src.channelName ? ' - ' + src.channelName : ''} (${matchTitle || channelId})`,
             url: proxyUrl,
             behaviorHints: { 
               notWebReady: true,
