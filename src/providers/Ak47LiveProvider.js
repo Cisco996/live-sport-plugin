@@ -393,6 +393,26 @@ class Ak47LiveProvider extends BaseProvider {
             let selected = streams[targetIdx] || streams.find(s => s.name && s.name.trim() === channelLabel) || streams[0];
             if (selected) {
               channelLabel = selected.name ? selected.name.trim() : channelLabel;
+
+              // Zero-DASH / DRM Enforcement: Drop any DRM or DASH stream
+              if (selected.drm_scheme || selected.key || selected.kid) {
+                console.warn(`[${this.name}] Dropped DASH / DRM stream: ${channelLabel}`);
+                return [];
+              }
+
+              // Reject embed.st or any WASM-based feeds
+              const tokenApiStr = typeof selected.tokenApi === 'string'
+                ? selected.tokenApi
+                : (selected.tokenApi ? JSON.stringify(selected.tokenApi) : '');
+
+              if (
+                /embed\.st|embedindia\.st|strmd\.st|gasm|wasm/i.test(selected.link || '') ||
+                /embed\.st|embedindia\.st|strmd\.st|gasm|wasm/i.test(tokenApiStr)
+              ) {
+                console.warn(`[${this.name}] Dropped embed.st / WASM stream: ${channelLabel}`);
+                return [];
+              }
+
               if (selected.link) {
                 const parts = selected.link.split('|');
                 streamUrl = parts[0].trim();
@@ -413,6 +433,11 @@ class Ak47LiveProvider extends BaseProvider {
                 try {
                   const tokenObj = typeof selected.tokenApi === 'string' ? JSON.parse(selected.tokenApi) : selected.tokenApi;
                   if (tokenObj && tokenObj.api) {
+                    // Skip if the target API is embed.st or WASM
+                    if (/embed\.st|embedindia\.st|strmd\.st|gasm|wasm/i.test(tokenObj.api)) {
+                      console.warn(`[${this.name}] Dropped embed.st tokenApi: ${tokenObj.api}`);
+                      return [];
+                    }
                     const tokenRes = await this.proxyFetch(tokenObj.api, {
                       headers: { 'User-Agent': DEFAULT_UA, 'Referer': 'https://hellobabu.xyz/' },
                       timeoutMs: 5000,
@@ -448,6 +473,12 @@ class Ak47LiveProvider extends BaseProvider {
     // Zero-DASH Enforcement: Reject any DASH streams
     if (/\.mpd(\?|$)/i.test(streamUrl) || /\/dash\//i.test(streamUrl) || /cenc/i.test(streamUrl)) {
       console.warn(`[${this.name}] Dropped DASH stream: ${streamUrl}`);
+      return [];
+    }
+
+    // Filter out embed.st or WASM-based streams
+    if (/embed\.st|embedindia\.st|strmd\.st|gasm|wasm/i.test(streamUrl)) {
+      console.warn(`[${this.name}] Dropped embed.st / WASM stream: ${streamUrl}`);
       return [];
     }
 

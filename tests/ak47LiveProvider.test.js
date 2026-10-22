@@ -289,6 +289,68 @@ http://193.47.62.1:8080/live/game.m3u8
       expect(resolved[0].behaviorHints.proxyHeaders.request['Referer']).toBe('https://www.sonyliv.com/');
       expect(resolved[0].behaviorHints.proxyHeaders.request['Origin']).toBe('https://www.sonyliv.com');
     });
+
+    test('drops DASH/DRM and embed.st/WASM streams from pro feeds', async () => {
+      const mockStreams = [
+        {
+          name: 'PARAMOUNT+ FHD',
+          link: 'https://example.com/live.mpd',
+          drm_scheme: 'clearkey',
+          key: 'somekey'
+        },
+        {
+          name: 'HD QUALITY',
+          tokenApi: JSON.stringify({ api: 'https://embed.st/embed/admin/ppv-test/1' })
+        },
+        {
+          name: 'SD QUALITY',
+          link: 'https://embedindia.st/stream.m3u8'
+        }
+      ];
+
+      const key = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+      const iv = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
+      const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+      cipher.setAutoPadding(true);
+      const enc = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(mockStreams), 'utf8')), cipher.final()]);
+      const b64 = enc.toString('base64');
+      const rev = Buffer.from(b64, 'ascii').reverse();
+      for (let i = 0; i < rev.length - 1; i += 2) {
+        const tmp = rev[i];
+        rev[i] = rev[i + 1];
+        rev[i + 1] = tmp;
+      }
+      const encryptedPro = rev.toString('base64');
+
+      jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+        status: 200,
+        text: async () => encryptedPro
+      });
+
+      // Stream 0: DASH / DRM
+      const dashRes = await provider.resolveStream('pro/test.txt#0', 'football', 'Match', {
+        id: 'pro/test.txt#0',
+        linksPath: 'pro/test.txt',
+        streamIndex: 0
+      });
+      expect(dashRes).toEqual([]);
+
+      // Stream 1: embed.st tokenApi
+      const embedRes = await provider.resolveStream('pro/test.txt#1', 'football', 'Match', {
+        id: 'pro/test.txt#1',
+        linksPath: 'pro/test.txt',
+        streamIndex: 1
+      });
+      expect(embedRes).toEqual([]);
+
+      // Stream 2: embedindia.st direct link
+      const wasmRes = await provider.resolveStream('pro/test.txt#2', 'football', 'Match', {
+        id: 'pro/test.txt#2',
+        linksPath: 'pro/test.txt',
+        streamIndex: 2
+      });
+      expect(wasmRes).toEqual([]);
+    });
   });
 
   describe('Container & System Integration', () => {
