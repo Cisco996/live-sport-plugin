@@ -803,7 +803,8 @@ class TeamLogoService {
         const queryName = TEAM_ALIASES[rawLower] || teamName;
         const cleanQuery = this._cleanName(queryName) || queryName;
 
-        const url = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(cleanQuery)}`;
+        const apiKey = process.env.THESPORTSDB_API_KEY || '123';
+        const url = `https://www.thesportsdb.com/api/v1/json/${apiKey}/searchteams.php?t=${encodeURIComponent(cleanQuery)}`;
         const res = await safeFetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
