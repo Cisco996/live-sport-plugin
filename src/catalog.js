@@ -237,9 +237,17 @@ function parseFavoriteTeams(conf) {
   // A multi-word favourite only matches when every token is found, so
   // "man united" cannot be satisfied by "Manchester City".
   return raw.split(',')
-    .map(t => foldText(t.trim()))
+    .map(t => foldText(t.trim().replace(/[^a-zA-Z0-9\s]/g, ' ')))
     .filter(Boolean)
-    .map(phrase => ({ phrase, tokens: phrase.split(/\s+/).filter(Boolean) }));
+    .map(phrase => {
+      let tokens = phrase.split(/\s+/).filter(Boolean);
+      tokens = tokens.map(t => {
+        if (t === 'jrs' || t === 'jr') return 'juniors';
+        if (t === 'utd') return 'united';
+        return t;
+      });
+      return { phrase, tokens };
+    });
 }
 
 /**
@@ -247,22 +255,16 @@ function parseFavoriteTeams(conf) {
  */
 function isFavoriteMatch(match, favorites) {
   if (!favorites || favorites.length === 0) return false;
+  if (!match || match.category === 'networks' || match.isChannel || !match.date || match.date === '0') return false;
   const title = foldText(match && match.title);
   if (!title) return false;
 
-  // Match on WORD BOUNDARIES with prefix semantics, not raw substrings.
-  // Raw substring matching had two failure modes:
-  //   - "Atletico" missed "Atlético Goianiense" (did not know the accent
-  //     fold target existed) and shorter forms missed longer official names;
-  //   - "Real" wrongly matched "Montreal Canadiens" (substring mid-word).
-  // Prefix-on-token fixes both: "atletico" matches the token "atletico",
-  // while "real" no longer matches "montreal".
   const titleTokens = title.split(/[^a-z0-9]+/).filter(Boolean);
   if (titleTokens.length === 0) return false;
 
   return favorites.some(fav =>
     fav.tokens.length > 0 &&
-    fav.tokens.every(ft => titleTokens.some(tt => tt.startsWith(ft)))
+    fav.tokens.every(ft => titleTokens.some(tt => tt === ft || (ft === 'juniors' && (tt === 'jrs' || tt === 'jr')) || (ft === 'united' && tt === 'utd')))
   );
 }
 
@@ -446,8 +448,13 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const derivedTeams = extractTeamsFromTitle(match.title);
   const rawTeam1 = (match.team1 && match.team1.name) || (derivedTeams ? derivedTeams[0] : null);
   const rawTeam2 = (match.team2 && match.team2.name) || (derivedTeams ? derivedTeams[1] : null);
-  const team1Name = cleanTeamName(rawTeam1) || rawTeam1;
-  const team2Name = cleanTeamName(rawTeam2) || rawTeam2;
+  let team1Name = cleanTeamName(rawTeam1) || rawTeam1;
+  let team2Name = cleanTeamName(rawTeam2) || rawTeam2;
+  const isLaLiga = (match.league && /la\s*liga/i.test(match.league)) || (match.title && /la\s*liga/i.test(match.title));
+  if (isLaLiga || match.category === 'football') {
+    if (team1Name && /^deportivo$/i.test(team1Name.trim())) team1Name = 'Deportivo Alavés';
+    if (team2Name && /^deportivo$/i.test(team2Name.trim())) team2Name = 'Deportivo Alavés';
+  }
 
   // Channel logos come from the unified ChannelLogoService (tv-logos CDN + Wikimedia).
 
@@ -1368,7 +1375,15 @@ async function handleCatalogUncached(type, id, extra, config) {
     });
   } else if (categoryMatch === 'teams') {
     if (favoriteTeams.length) {
-      filteredMatches = matches.filter(m => isFavoriteMatch(m, favoriteTeams));
+      const now = Date.now();
+      filteredMatches = matches.filter(m => {
+        // Your Teams strictly takes from live and upcoming events only (no 24/7 channels)
+        if (m.category === 'networks' || m.isChannel || !m.date || m.date === '0') return false;
+        const isLive = isMatchLive(m);
+        const isUpcoming = !isLive && (getKickoff(m.date) || 0) > now;
+        if (!isLive && !isUpcoming) return false;
+        return isFavoriteMatch(m, favoriteTeams);
+      });
     } else {
       filteredMatches = []; // If no config, return empty
     }
