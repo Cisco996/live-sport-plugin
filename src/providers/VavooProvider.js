@@ -566,7 +566,8 @@ class VavooProvider extends BaseProvider {
       const isHevc = Boolean(/\b(?:hevc|h\.?265)\b/i.test(rawChannelName));
       const isRaw = Boolean(/\braw\b/i.test(rawChannelName));
       const isServerC = Boolean(/\.c\b|server\s*c/i.test(rawChannelName));
-      const isServerB = Boolean(!isServerC && (/\.b\b|server\s*b/i.test(rawChannelName)));
+      const isServerS = Boolean(!isServerC && (/\.s\b|server\s*s/i.test(rawChannelName)));
+      const isServerB = Boolean(!isServerC && !isServerS && (/\.b\b|server\s*b/i.test(rawChannelName)));
 
       let serverTag = '';
       let clusterKey = 'main';
@@ -577,6 +578,10 @@ class VavooProvider extends BaseProvider {
           serverTag = '[Server C - Backup]';
           clusterKey = 'c-backup';
           clusterScore = 72;
+        } else if (isServerS) {
+          serverTag = '[Server S - Backup]';
+          clusterKey = 's-backup';
+          clusterScore = 71;
         } else {
           serverTag = '[Backup]';
           clusterKey = 'backup';
@@ -594,6 +599,10 @@ class VavooProvider extends BaseProvider {
         serverTag = `[Server C - ${resolution}]`;
         clusterKey = 'c';
         clusterScore = is4K ? 96 : 90;
+      } else if (isServerS) {
+        serverTag = `[Server S - ${resolution}]`;
+        clusterKey = 's';
+        clusterScore = is4K ? 95 : 88;
       } else if (isServerB) {
         serverTag = `[Server B - ${resolution}]`;
         clusterKey = 'b';
@@ -617,7 +626,7 @@ class VavooProvider extends BaseProvider {
         score: clusterScore,
         cluster: clusterKey,
         serverCluster: serverTag.replace(/^\[|\]$/g, ''),
-        _streamSource: isServerC ? 'Server C' : (isServerB ? 'Server B' : (isHevc ? 'HEVC' : (isRaw ? 'RAW' : (isBackup ? 'Backup' : undefined)))),
+        _streamSource: isServerC ? 'Server C' : (isServerS ? 'Server S' : (isServerB ? 'Server B' : (isHevc ? 'HEVC' : (isRaw ? 'RAW' : (isBackup ? 'Backup' : undefined))))),
         language: src.language || undefined,
         channelName: channelLabel,
         canonicalChannel: src.canonicalChannel || channelLabel,

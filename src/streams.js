@@ -799,6 +799,7 @@ function getVavooClusterKey(s) {
   if (s.serverCluster) {
     const sc = String(s.serverCluster).toLowerCase();
     if (sc.includes('server c') || sc === 'c') return 'c';
+    if (sc.includes('server s') || sc === 's') return 's';
     if (sc.includes('server b') || sc === 'b') return 'b';
     if (sc.includes('hevc')) return 'hevc';
     if (sc.includes('raw')) return 'raw';
@@ -807,6 +808,7 @@ function getVavooClusterKey(s) {
   }
   const text = `${s.title || ''} ${s.channelName || ''} ${s.name || ''} ${s._streamSource || ''}`.toLowerCase();
   if (/server\s*c|\.c\b/i.test(text)) return 'c';
+  if (/server\s*s|\.s\b/i.test(text)) return 's';
   if (/server\s*b|\.b\b/i.test(text)) return 'b';
   if (/\bhevc\b|\bh265\b/i.test(text)) return 'hevc';
   if (/\braw\b/i.test(text)) return 'raw';

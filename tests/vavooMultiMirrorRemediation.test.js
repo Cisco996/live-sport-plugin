@@ -60,6 +60,30 @@ describe('Vavoo Multi-Mirror Remediation & ExoPlayer 403 Hardening', () => {
       expect(s.url).toContain('referer=' + encodeURIComponent('https://vavoo.to/'));
     });
 
+    it('resolves Server S feeds with [Server S - 1080p] and score 88', async () => {
+      const provider = new VavooProvider({ tokenManager: mockTokenManager });
+      const cdnUrl = 'https://37.49.225.28:8008/sunshine/play/sky1s/index.m3u8';
+      provider.proxyFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([{ url: cdnUrl }])
+      });
+
+      const streams = await provider.resolveStream(
+        'https://vavoo.to/vavoo-iptv/play/sky1s',
+        'networks',
+        'SKY SPORT 1 .s',
+        { id: 'https://vavoo.to/vavoo-iptv/play/sky1s', channelName: 'SKY SPORT 1 .s', group: 'Germany', language: 'de', is4k: false }
+      );
+
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.title).toBe('Vavoo (SKY SPORT 1) [Server S - 1080p]');
+      expect(s.score).toBe(88);
+      expect(s.cluster).toBe('s');
+      expect(s.serverCluster).toBe('Server S - 1080p');
+    });
+
     it('resolves Server B feeds with [Server B - 1080p] and score 85', async () => {
       const provider = new VavooProvider({ tokenManager: mockTokenManager });
       const cdnUrl = 'https://37.49.225.28:8008/sunshine/play/sky1b/index.m3u8';
@@ -251,8 +275,9 @@ describe('Vavoo Multi-Mirror Remediation & ExoPlayer 403 Hardening', () => {
   });
 
   describe('3. Cluster Ordering in LanguagePriorityService', () => {
-    it('ranks clusters: Server C (5) > Server B (4) > HEVC (3) > RAW (2) > Backup (1)', () => {
-      expect(getVavooClusterRank({ name: 'Vavoo', cluster: 'c' })).toBe(5);
+    it('ranks clusters: Server C (6) > Server S (5) > Server B (4) > HEVC (3) > RAW (2) > Backup (1)', () => {
+      expect(getVavooClusterRank({ name: 'Vavoo', cluster: 'c' })).toBe(6);
+      expect(getVavooClusterRank({ name: 'Vavoo', cluster: 's' })).toBe(5);
       expect(getVavooClusterRank({ name: 'Vavoo', cluster: 'b' })).toBe(4);
       expect(getVavooClusterRank({ name: 'Vavoo', cluster: 'hevc' })).toBe(3);
       expect(getVavooClusterRank({ name: 'Vavoo', cluster: 'raw' })).toBe(2);

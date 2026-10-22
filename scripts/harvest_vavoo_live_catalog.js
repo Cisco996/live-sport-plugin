@@ -129,8 +129,8 @@ async function harvestAll() {
   for (const item of allRawItems) {
     if (!item || !item.url || !item.name) continue;
 
-    // Filter out .s / event-only feeds to keep continuous 24/7 channel cards clean of ephemeral feeds
-    if (item.name.includes('.s') || /live during events only/i.test(item.name)) {
+    // Filter out ephemeral event-only pop-up feeds while preserving continuous 24/7 channels on Server S
+    if (/live during events only/i.test(item.name) || /\(event only\)/i.test(item.name)) {
       continue;
     }
 
@@ -138,22 +138,25 @@ async function harvestAll() {
     const cleanBaseName = cleanChannelName(item.name);
     if (!cleanBaseName) continue;
 
-    // Preserve multi-cluster mirrors (.b, .c, HEVC, RAW, Backup) as separate entries
+    // Preserve multi-cluster mirrors (.b, .c, .s, HEVC, RAW, Backup) as separate entries
     let clusterSuffix = 'main';
     const isB = /\.b\b|server\s*b/i.test(item.name);
     const isC = /\.c\b|server\s*c/i.test(item.name);
+    const isS = !isC && !isB && (/\.s\b|server\s*s/i.test(item.name));
     const isBkp = /\b(?:backup(?:\s*\d+)?)\b/i.test(item.name);
     const isHvc = /\bhevc\b|\bh265\b/i.test(item.name);
     const isRw = /\braw\b/i.test(item.name);
 
     if (isBkp) {
-      clusterSuffix = isC ? 'c-backup' : (isB ? 'b-backup' : 'backup');
+      clusterSuffix = isC ? 'c-backup' : (isS ? 's-backup' : (isB ? 'b-backup' : 'backup'));
     } else if (isHvc) {
-      clusterSuffix = isC ? 'c-hevc' : (isB ? 'b-hevc' : 'hevc');
+      clusterSuffix = isC ? 'c-hevc' : (isS ? 's-hevc' : (isB ? 'b-hevc' : 'hevc'));
     } else if (isRw) {
-      clusterSuffix = isC ? 'c-raw' : (isB ? 'b-raw' : 'raw');
+      clusterSuffix = isC ? 'c-raw' : (isS ? 's-raw' : (isB ? 'b-raw' : 'raw'));
     } else if (isC) {
       clusterSuffix = 'c';
+    } else if (isS) {
+      clusterSuffix = 's';
     } else if (isB) {
       clusterSuffix = 'b';
     }

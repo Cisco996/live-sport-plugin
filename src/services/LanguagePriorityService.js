@@ -285,7 +285,8 @@ function streamFormatTier(stream) {
 
 /**
  * Cluster reliability tier for Vavoo feeds:
- * 5: Server C (.c cloud cluster)
+ * 6: Server C (.c cloud cluster)
+ * 5: Server S (.s direct satellite/origin cluster)
  * 4: Server B (.b)
  * 3: HEVC
  * 2: RAW
@@ -303,7 +304,8 @@ function getVavooClusterRank(stream) {
   if (cluster.includes('raw')) return 2;
   if (cluster.includes('hevc') || cluster.includes('h265')) return 3;
   if (cluster.includes('server b') || cluster === 'b' || /\.b\b/.test(cluster)) return 4;
-  if (cluster.includes('server c') || cluster === 'c' || /\.c\b/.test(cluster)) return 5;
+  if (cluster.includes('server s') || cluster === 's' || /\.s\b/.test(cluster)) return 5;
+  if (cluster.includes('server c') || cluster === 'c' || /\.c\b/.test(cluster)) return 6;
   return 3.5;
 }
 
