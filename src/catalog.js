@@ -645,7 +645,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
       channel: broadcasterName || (isChannelLike ? match.title : null),
       channelBadge: channelMark,
       status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
-      score: match.score,
+      score: isReplay ? null : match.score,
       time: formatKickoffForCard(match.date, config),
       shape: reqType === 'series' ? 'poster' : 'landscape'
     }) || fallbackPoster;
