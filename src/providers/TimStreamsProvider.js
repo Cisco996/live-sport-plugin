@@ -42,19 +42,35 @@ class TimStreamsProvider extends BaseProvider {
         
         const category = this.normalizeCategory(genreLabel);
         
-        let dateMs = Date.now();
+        let dateMs = null;
         if (s.time) {
           const parsed = parseTimezone(s.time, 'America/New_York');
-          if (parsed) dateMs = parsed;
+          if (parsed && !isNaN(parsed) && parsed > 0) {
+            dateMs = parsed;
+          } else {
+            const rawTime = new Date(s.time).getTime();
+            if (!isNaN(rawTime) && rawTime > 0) {
+              dateMs = rawTime;
+            }
+          }
         }
 
-        // TimStreams exposes a time but no explicit kickoff-window guarantee, so we
-        // KEEP everything. The previous code silently dropped any match whose time
-        // fell outside a 4 h live window (and every match whose date failed to
-        // parse, since dateMs then defaulted to now for all of them). Losing
-        // events is far worse than listing a few extra ones.
         const now = Date.now();
-        const isLive = dateMs <= now && dateMs > now - (12 * 60 * 60 * 1000);
+        const maxDuration = 4 * 60 * 60 * 1000;
+        let isLive = false;
+        let status = 'upcoming';
+
+        if (dateMs !== null) {
+          if (dateMs <= now && (now - dateMs) <= maxDuration) {
+            isLive = true;
+            status = 'live';
+          } else if (dateMs > now) {
+            status = 'upcoming';
+          } else {
+            // Event kicked off > 4 hours ago; TimStreams is a live/upcoming scraper, not a replay archive
+            return;
+          }
+        }
 
         const sources = (s.streams || [])
           .filter(st => !st.vip)
@@ -76,8 +92,9 @@ class TimStreamsProvider extends BaseProvider {
             id: `ts_${s.url || index}`,
             title: title,
             category: category,
-            date: dateMs.toString(),
-            popular: (isLive || s.featured) ? '1' : '0',
+            date: dateMs ? dateMs.toString() : '',
+            status: status,
+            popular: (isLive && s.featured) ? '1' : '0',
             sources: sources,
             thumbnail_url: s.logo || ''
           }));
