@@ -89,8 +89,8 @@ describe('WorkerBudget — configuration', () => {
     expect(cluster.paidCapPerProcess).toBe(Math.floor(single.paidCapPerProcess / 2));
   });
 
-  test('HLSCUNK_FALLBACK defaults on and accepts off', () => {
-    expect(resolveConfig({}).hlschunkFallback).toBe(true);
+  test('HLSCUNK_FALLBACK defaults off and accepts on', () => {
+    expect(resolveConfig({}).hlschunkFallback).toBe(false);
     expect(resolveConfig({ HLSCUNK_FALLBACK: 'off' }).hlschunkFallback).toBe(false);
     expect(resolveConfig({ HLSCUNK_FALLBACK: 'on' }).hlschunkFallback).toBe(true);
   });
@@ -219,6 +219,27 @@ describe('WorkerBudget — allocation', () => {
     const allWorkers = new Set([...DEFAULT_FREE_POOL, DEFAULT_PAID_WORKER]);
     expect(pool.pick(null, { exclude: allWorkers })).toBeNull();
   });
+
+  test('paid worker keeps serving past the soft cap up to the hard ceiling', () => {
+    const lines = [];
+    const pool = createWorkerPool({
+      env: {},
+      log: (line) => lines.push(line),
+      overrides: { freeCapPerProcess: 0, paidSoftCapPerProcess: 2, paidCapPerProcess: 4 },
+    });
+
+    expect(pool.pick('s1.image').tier).toBe('paid');
+    expect(pool.pick('s2.image').tier).toBe('paid');
+    expect(pool.snapshot().paid.overSoftCap).toBe(true);
+    expect(lines.some((l) => l.includes('crossed soft cap'))).toBe(true);
+
+    // Kept serving past the soft cap
+    expect(pool.pick('s3.image').tier).toBe('paid');
+    expect(pool.pick('s4.image').tier).toBe('paid');
+
+    // Hard ceiling reached: now returns null
+    expect(pool.pick('s5.image')).toBeNull();
+  });
 });
 
 describe('WorkerBudget — dedupe of sliding-window re-emissions', () => {
@@ -332,7 +353,7 @@ describe('HlsRewriteService — exhaustion fallback', () => {
   // exhausted after a few dozen emissions without needing 600k calls.
   const TIGHT = { WORKER_INSTANCE_COUNT: '200000' };
 
-  test('falls back to /api/hlschunk by default', () => {
+  test('emits the upstream URL by default on exhaustion', () => {
     withServiceEnv(TIGHT, ({ rewriteHlsUri, workerPool }) => {
       for (let i = 0; i < workerPool.config.paidCapPerProcess; i += 1) {
         rewriteHlsUri(`seg${i}.image`, MANIFEST);
@@ -340,19 +361,19 @@ describe('HlsRewriteService — exhaustion fallback', () => {
       expect(workerPool.pick('probe.image')).toBeNull();
 
       const out = rewriteHlsUri('seg-final.image', MANIFEST);
-      expect(out).toContain('/api/hlschunk?url=');
+      expect(out).toBe('https://cdn.example/live/seg-final.image');
     });
   });
 
-  test('emits the upstream URL when HLSCUNK_FALLBACK=off', () => {
-    withServiceEnv({ ...TIGHT, HLSCUNK_FALLBACK: 'off' }, ({ rewriteHlsUri, workerPool }) => {
+  test('falls back to /api/hlschunk when HLSCUNK_FALLBACK=on', () => {
+    withServiceEnv({ ...TIGHT, HLSCUNK_FALLBACK: 'on' }, ({ rewriteHlsUri, workerPool }) => {
       for (let i = 0; i < workerPool.config.paidCapPerProcess; i += 1) {
         rewriteHlsUri(`seg${i}.image`, MANIFEST);
       }
       expect(workerPool.pick('probe.image')).toBeNull();
 
       const out = rewriteHlsUri('seg-final.image', MANIFEST);
-      expect(out).toBe('https://cdn.example/live/seg-final.image');
+      expect(out).toContain('/api/hlschunk?url=');
     });
   });
 });

@@ -55,10 +55,12 @@ const DEFAULT_PAID_WORKER = 'https://nuvio-proxy2.rajodedara360.workers.dev';
 // the Workers Paid standard usage model.
 const FREE_DAILY_LIMIT = 100000;
 const PAID_MONTHLY_LIMIT = 10000000;
+const PAID_HARD_LIMIT = 20000000;
 
 const DEFAULTS = {
   freeCapRatio: 0.9, // stop at 90k of 100k so drift never turns into a hard stop
-  paidCapRatio: 0.95, // stay under the included 10M before billing starts
+  paidSoftCapRatio: 0.95, // warn at 9.5M before 10M included billing starts
+  paidHardLimit: 20000000, // absolute monthly ceiling (10M included + 10M burst allowance)
   dedupeTtlMs: 120000,
   dedupeMaxEntries: 20000,
   instances: 1,
@@ -136,23 +138,31 @@ function resolveConfig(env = process.env, overrides = {}) {
             instances
         );
 
+  const paidSoftRatio = readNumber(
+    env.CF_PAID_SOFT_STOP_RATIO !== undefined ? env.CF_PAID_SOFT_STOP_RATIO : env.CF_PAID_CAP_RATIO,
+    DEFAULTS.paidSoftCapRatio
+  );
+
+  const paidSoftCapPerProcess =
+    overrides.paidSoftCapPerProcess !== undefined
+      ? overrides.paidSoftCapPerProcess
+      : Math.floor((PAID_MONTHLY_LIMIT * paidSoftRatio) / instances);
+
   const paidCapPerProcess =
     overrides.paidCapPerProcess !== undefined
       ? overrides.paidCapPerProcess
-      : Math.floor(
-          (PAID_MONTHLY_LIMIT * readNumber(env.CF_PAID_CAP_RATIO, DEFAULTS.paidCapRatio)) /
-            instances
-        );
+      : Math.floor(readNumber(env.CF_PAID_HARD_LIMIT, DEFAULTS.paidHardLimit) / instances);
 
   return {
     freePool,
     paidWorker,
     freeCapPerProcess,
+    paidSoftCapPerProcess,
     paidCapPerProcess,
     instances,
     dedupeTtlMs: readNumber(env.CF_DEDUPE_TTL_MS, DEFAULTS.dedupeTtlMs),
     dedupeMaxEntries: Math.floor(readNumber(env.CF_DEDUPE_MAX_ENTRIES, DEFAULTS.dedupeMaxEntries)),
-    hlschunkFallback: readFlag(env.HLSCUNK_FALLBACK, true),
+    hlschunkFallback: readFlag(env.HLSCUNK_FALLBACK, false),
     logIntervalMs: readNumber(env.WORKER_POOL_LOG_INTERVAL_MS, DEFAULTS.logIntervalMs),
     logEnabled: readFlag(env.WORKER_POOL_LOG, true),
   };
@@ -173,6 +183,7 @@ function createWorkerPool(options = {}) {
   const dedupe = new Map(); // segment key -> { workerUrl, tier, expiresAt }
 
   let overflowDay = null;
+  let softWarnedMonth = null;
   let logTimer = null;
   let lastExhaustedLogMs = -Infinity;
 
@@ -217,7 +228,7 @@ function createWorkerPool(options = {}) {
     const snap = snapshot();
     const free = snap.free.map((w) => `${hostOf(w.url)}=${w.used}/${w.cap}`).join(' ');
     log(
-      `[WorkerBudget] ${snap.day} free ${free} paid ${hostOf(snap.paid.url)}=${snap.paid.used}/${snap.paid.cap}`
+      `[WorkerBudget] ${snap.day} free ${free} paid ${hostOf(snap.paid.url)}=${snap.paid.used}/${snap.paid.softCap}+${snap.paid.hardCap}`
     );
   }
 
@@ -285,6 +296,15 @@ function createWorkerPool(options = {}) {
       chosen = { url, tier: 'free' };
     } else if ((!exclude || !exclude.has(config.paidWorker)) && paidUsedThisMonth(month) < config.paidCapPerProcess) {
       bumpPaid(month);
+      const usedNow = paidUsedThisMonth(month);
+      if (usedNow >= config.paidSoftCapPerProcess && softWarnedMonth !== month) {
+        softWarnedMonth = month;
+        if (config.logEnabled) {
+          log(
+            `[WorkerBudget] ${month}: paid worker usage (${usedNow}) crossed soft cap (${config.paidSoftCapPerProcess}) — billing active above 10M`
+          );
+        }
+      }
       chosen = { url: config.paidWorker, tier: 'paid' };
       if (overflowDay !== day) {
         overflowDay = day;
@@ -316,6 +336,7 @@ function createWorkerPool(options = {}) {
     const at = now();
     const day = utcDayKey(at);
     const month = utcMonthKey(at);
+    const paidUsed = paidUsedThisMonth(month);
     return {
       day,
       month,
@@ -326,7 +347,10 @@ function createWorkerPool(options = {}) {
       })),
       paid: {
         url: config.paidWorker,
-        used: paidUsedThisMonth(month),
+        used: paidUsed,
+        softCap: config.paidSoftCapPerProcess,
+        hardCap: config.paidCapPerProcess,
+        overSoftCap: paidUsed >= config.paidSoftCapPerProcess,
         cap: config.paidCapPerProcess,
       },
     };
@@ -349,6 +373,7 @@ module.exports = {
   DEFAULT_PAID_WORKER,
   FREE_DAILY_LIMIT,
   PAID_MONTHLY_LIMIT,
+  PAID_HARD_LIMIT,
   utcDayKey,
   utcMonthKey,
 };

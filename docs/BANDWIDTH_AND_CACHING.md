@@ -55,11 +55,13 @@ workers that all exhausted at the same moment.
 
 The pool is now budgeted (`src/services/WorkerBudget.js`): six free workers
 (100k/day each, hard stop) are spent first, and the single paid worker on
-`nuvio-proxy2` (10M/month included, billed above that) takes the overflow. The
-paid worker is filtered out of `CF_IMAGE_WORKER_POOL` entirely, so it is
-unreachable by the random draw. `/api/hlschunk` is reached only when *both*
-tiers are out of budget; `HLSCUNK_FALLBACK=off` makes that case emit the
-upstream URL instead of relaying segment bytes through the VPS.
+`nuvio-proxy2` (10M/month included, soft warning at 95%, hard ceiling at 20M/month)
+takes the overflow. The paid worker is filtered out of the free pool entirely, so it is
+unreachable by the random draw. Exhaustion occurs only when the free tier is spent AND
+the paid tier exceeds the hard ceiling. On exhaustion, `HLSCUNK_FALLBACK` defaults to `off`
+(production default), emitting the upstream CDN URL directly so video bytes never pass
+through the VPS (enforcing the Zero Server Bandwidth Bleed Policy). `HLSCUNK_FALLBACK=on`
+is available only as a temporary emergency escape hatch.
 
 ## The hub multiplier
 
