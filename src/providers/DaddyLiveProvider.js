@@ -149,8 +149,8 @@ class DaddyLiveProvider extends BaseProvider {
     // even when the schedule fails, so 'did it return anything' is not a
     // usable health signal - fixtures and channels fail independently.
     this.lastScheduleOk = null;
-    this.baseDomains = ['https://dlive.sx', 'https://dlstreams.st'];
-    this.folders = ['cast', 'casting', 'watch', 'player', 'plus', 'stream'];
+    this.baseDomains = ['https://thedaddy.pk', 'https://dlive.sx', 'https://dlstreams.st'];
+    this.folders = ['cast', 'casting', 'watch', 'player', 'plus', 'stream', 'hub'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`
@@ -1010,7 +1010,7 @@ class DaddyLiveProvider extends BaseProvider {
 
     // Web player fallback if no direct stream was decrypted
     if (streams.length === 0) {
-      const fallbackUrl = `https://dlive.sx/stream/stream-${sourceId}.php`;
+      const fallbackUrl = `${this.baseDomains[0]}/stream/stream-${sourceId}.php`;
       const label = channelName ? `DaddyLive (${channelName}) (Web Player)` : `DaddyLive Stream ${sourceId} (Web Player)`;
       streams.push(new StreamEntity({
         name: 'DaddyLive',

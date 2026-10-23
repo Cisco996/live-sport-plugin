@@ -508,7 +508,7 @@ function repairRefererFor(targetUrl) {
 
   if (/\.wfty\.st$/.test(host) || /watchfooty/i.test(host)) return 'https://sportsembed.su/';
   if (/\.strmd\.st$/.test(host) || /streamed/i.test(host)) return 'https://embed.st/';
-  if (/tiestep|dlive|dlstreams|daddylive|assetrage|romponalis/i.test(host) || /\.7odxv0l067ka\.net$/.test(host)) return 'https://assetrage.net/';
+  if (/tiestep|dlive|thedaddy|dlstreams|daddylive|assetrage|romponalis/i.test(host) || /\.7odxv0l067ka\.net$/.test(host)) return 'https://assetrage.net/';
   // Terminal hosts discovered by the DaddyLive iframe-domain audit. These
   // are the endpoints the embed decoders actually point at, so the
   // referer must be the page that served the manifest, not a generic
@@ -1393,7 +1393,7 @@ async function handleStream(type, id, config) {
       s.behaviorHints.notWebReady = true;
       
       let referer = '';
-      if (providerName === 'DaddyLive') referer = 'https://dlive.sx/';
+      if (providerName === 'DaddyLive') referer = 'https://thedaddy.pk/';
       else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
       else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
       else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';

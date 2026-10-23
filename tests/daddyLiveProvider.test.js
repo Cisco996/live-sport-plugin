@@ -320,7 +320,7 @@ describe('DaddyLiveProvider', () => {
       // First domain fails, second domain succeeds
       provider.proxyFetch = jest.fn()
         .mockRejectedValueOnce(new Error('primary domain timeout'))
-        .mockResolvedValueOnce({ ok: true, json: async () => mockSchedule });
+        .mockResolvedValueOnce({ ok: true, text: async () => '<div class="schedule__day"><div class="schedule__dayTitle">Friday</div><div class="schedule__category"><div class="schedule__categoryTitle">Soccer</div><div class="schedule__event"><div class="schedule__eventTime">20:00</div><div class="schedule__eventTitle">Arsenal vs Chelsea</div><div class="schedule__channels"><a href="/watch.php?id=35">Sky Sports</a></div></div></div></div>', json: async () => mockSchedule });
 
       const data = await provider.fetchSchedule.fire();
       expect(data).toBeDefined();
