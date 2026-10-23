@@ -206,6 +206,84 @@ http://193.47.62.1:8080/live/game.m3u8
       expect(Array.isArray(matches)).toBe(true);
       expect(matches.length).toBe(0);
     });
+
+    test('parses real event dates, formats solo event titles, and filters invisible events', async () => {
+      const mockEvents = [
+        {
+          event: JSON.stringify({
+            eventName: 'LaLiga',
+            teamAName: 'Real Madrid',
+            teamBName: 'Barcelona',
+            category: 'Football',
+            date: '25/10/2026',
+            time: '20:00:00',
+            visible: true,
+            links: 'pro/elclasico.txt',
+            link_names: ['HD 1']
+          })
+        },
+        {
+          event: JSON.stringify({
+            eventName: 'Horse Racing',
+            teamAName: 'Horse Racing',
+            teamBName: 'Horse Racing',
+            category: 'Other',
+            date: '25/10/2026',
+            time: '14:00:00',
+            visible: true,
+            links: 'pro/racing.txt',
+            link_names: ['HD']
+          })
+        },
+        {
+          event: JSON.stringify({
+            eventName: 'Hidden Dummy',
+            teamAName: 'Dummy A',
+            teamBName: 'Dummy B',
+            category: 'Football',
+            visible: false,
+            links: 'pro/dummy.txt'
+          })
+        }
+      ];
+
+      const key = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+      const iv = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
+      const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+      cipher.setAutoPadding(true);
+      const enc = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(mockEvents), 'utf8')), cipher.final()]);
+      const b64 = enc.toString('base64');
+      const rev = Buffer.from(b64, 'ascii').reverse();
+      for (let i = 0; i < rev.length - 1; i += 2) {
+        const tmp = rev[i];
+        rev[i] = rev[i + 1];
+        rev[i + 1] = tmp;
+      }
+      const encryptedEvents = rev.toString('base64');
+
+      jest.spyOn(provider, 'proxyFetch').mockImplementation(async (url) => {
+        if (url.includes('events.txt')) {
+          return { status: 200, text: async () => encryptedEvents };
+        }
+        return { status: 404, text: async () => '' };
+      });
+
+      const matches = await provider.getMatches();
+      expect(matches.length).toBe(2);
+
+      const match1 = matches.find(m => m.title.includes('Real Madrid'));
+      expect(match1).toBeDefined();
+      expect(match1.title).toBe('Real Madrid vs Barcelona');
+      expect(match1.team1).toEqual({ name: 'Real Madrid' });
+      expect(match1.team2).toEqual({ name: 'Barcelona' });
+      expect(match1.date).toBe(String(Date.UTC(2026, 9, 25, 20, 0, 0)));
+
+      const match2 = matches.find(m => m.title === 'Horse Racing');
+      expect(match2).toBeDefined();
+      expect(match2.title).toBe('Horse Racing');
+      expect(match2.team1).toBeNull();
+      expect(match2.team2).toBeNull();
+    });
   });
 
   describe('resolveStream & Proxy Headers Decoration', () => {

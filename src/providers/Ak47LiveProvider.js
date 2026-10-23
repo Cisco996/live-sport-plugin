@@ -234,11 +234,43 @@ class Ak47LiveProvider extends BaseProvider {
           for (const item of events) {
             const evStr = item.event;
             const ev = typeof evStr === 'string' ? JSON.parse(evStr) : evStr;
-            if (!ev || !ev.teamAName || !ev.teamBName) continue;
+            if (!ev || ev.visible === false || !ev.teamAName || !ev.teamBName) continue;
 
-            const team1 = ev.teamAName.trim();
-            const team2 = ev.teamBName.trim();
-            const title = `${team1} vs ${team2}`;
+            let matchDateMs = 0;
+            if (ev.date && ev.time) {
+              const dParts = ev.date.split('/').map(Number);
+              const tParts = ev.time.split(':').map(Number);
+              if (dParts.length === 3 && dParts[0] && dParts[1] && dParts[2]) {
+                const dt = new Date(Date.UTC(dParts[2], dParts[1] - 1, dParts[0], tParts[0] || 0, tParts[1] || 0, tParts[2] || 0));
+                if (!isNaN(dt.getTime())) matchDateMs = dt.getTime();
+              }
+            }
+
+            let endDateMs = 0;
+            if (ev.end_date && ev.end_time) {
+              const dParts = ev.end_date.split('/').map(Number);
+              const tParts = ev.end_time.split(':').map(Number);
+              if (dParts.length === 3 && dParts[0] && dParts[1] && dParts[2]) {
+                const dt = new Date(Date.UTC(dParts[2], dParts[1] - 1, dParts[0], tParts[0] || 0, tParts[1] || 0, tParts[2] || 0));
+                if (!isNaN(dt.getTime())) endDateMs = dt.getTime();
+              }
+            }
+
+            // Omit events that finished more than 30 mins ago
+            const isFinished = endDateMs > 0
+              ? (now > endDateMs + 30 * 60 * 1000)
+              : (matchDateMs > 0 ? (now > matchDateMs + 4 * 60 * 60 * 1000) : false);
+            if (isFinished) continue;
+
+            const status = matchDateMs > 0 ? (now < matchDateMs ? 'UPCOMING' : 'LIVE') : 'LIVE';
+            const matchDate = matchDateMs > 0 ? String(matchDateMs) : '0';
+
+            const t1Raw = ev.teamAName.trim();
+            const t2Raw = ev.teamBName.trim();
+            const isMatchup = Boolean(t1Raw && t2Raw && t1Raw.toLowerCase() !== t2Raw.toLowerCase());
+            const title = isMatchup ? `${t1Raw} vs ${t2Raw}` : (ev.eventName ? ev.eventName.trim() : t1Raw);
+            const team1 = isMatchup ? { name: t1Raw } : null;
+            const team2 = isMatchup ? { name: t2Raw } : null;
             const category = this.normalizeCategory(ev.category || 'Football');
             const league = ev.eventName ? ev.eventName.trim() : '';
             const matchSlug = this.normalizeStr(title) || 'match';
@@ -282,10 +314,10 @@ class Ak47LiveProvider extends BaseProvider {
                 title,
                 category,
                 league,
-                date: now.toString(),
-                status: 'LIVE',
-                team1: { name: team1 },
-                team2: { name: team2 },
+                date: matchDate,
+                status,
+                team1,
+                team2,
                 thumbnail_url: ev.eventLogo || ev.teamAFlag || '',
                 poster: '',
                 sources
@@ -342,7 +374,7 @@ class Ak47LiveProvider extends BaseProvider {
                 title,
                 category,
                 league: entry.groupTitle || '',
-                date: now.toString(),
+                date: '0',
                 status: 'LIVE',
                 team1: team1 ? { name: team1 } : null,
                 team2: team2 ? { name: team2 } : null,
