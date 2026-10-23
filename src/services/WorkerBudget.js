@@ -37,6 +37,16 @@
  * be fetched by the player, so the recorded usage can only run ahead of real
  * usage. Overshooting moves traffic to the paid worker early; it never fails a
  * segment.
+ *
+ * Spent-worker detection (fire-and-forget probe):
+ *  - Emission counting can only run ahead of real usage: a worker Cloudflare has
+ *    already blocked (due to quota or rate-limiting) would keep receiving traffic
+ *    until the local counter drains.
+ *  - Trade-off: when a free worker's count reaches CF_PROBE_THRESHOLD (default
+ *    0.8 × cap), a detached background HEAD request is sent to <worker>/.
+ *    A 403, 429, or 503 response marks that worker spent for the UTC day,
+ *    filtering it out of pick() immediately.
+ *  - The paid worker is never probed. Network failures leave spent=false.
  */
 
 // Six free workers. The paid worker is deliberately NOT in this list.
@@ -61,6 +71,7 @@ const DEFAULTS = {
   freeCapRatio: 0.9, // stop at 90k of 100k so drift never turns into a hard stop
   paidSoftCapRatio: 0.95, // warn at 9.5M before 10M included billing starts
   paidHardLimit: 20000000, // absolute monthly ceiling (10M included + 10M burst allowance)
+  probeThreshold: 0.8, // fraction of cap (0-1) to trigger background HEAD probe; >=1 disables
   dedupeTtlMs: 120000,
   dedupeMaxEntries: 20000,
   instances: 1,
@@ -162,6 +173,10 @@ function resolveConfig(env = process.env, overrides = {}) {
     instances,
     dedupeTtlMs: readNumber(env.CF_DEDUPE_TTL_MS, DEFAULTS.dedupeTtlMs),
     dedupeMaxEntries: Math.floor(readNumber(env.CF_DEDUPE_MAX_ENTRIES, DEFAULTS.dedupeMaxEntries)),
+    probeThreshold:
+      overrides.probeThreshold !== undefined
+        ? overrides.probeThreshold
+        : readNumber(env.CF_PROBE_THRESHOLD, DEFAULTS.probeThreshold),
     hlschunkFallback: readFlag(env.HLSCUNK_FALLBACK, false),
     logIntervalMs: readNumber(env.WORKER_POOL_LOG_INTERVAL_MS, DEFAULTS.logIntervalMs),
     logEnabled: readFlag(env.WORKER_POOL_LOG, true),
@@ -176,16 +191,50 @@ function createWorkerPool(options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => new Date();
   const random = typeof options.random === 'function' ? options.random : Math.random;
   const log = typeof options.log === 'function' ? options.log : (line) => console.log(line);
+  const httpProbe = typeof options.httpProbe === 'function' ? options.httpProbe : fetch;
   const config = resolveConfig(options.env || process.env, options.overrides || {});
 
   const freeState = new Map(); // url -> { day, used }
   let paidState = { month: null, used: 0 };
   const dedupe = new Map(); // segment key -> { workerUrl, tier, expiresAt }
+  const probeState = new Map(); // url -> { day, probing: boolean, spent: boolean }
 
   let overflowDay = null;
   let softWarnedMonth = null;
   let logTimer = null;
   let lastExhaustedLogMs = -Infinity;
+
+  function isWorkerSpent(url, day) {
+    const s = probeState.get(url);
+    return !!(s && s.day === day && s.spent);
+  }
+
+  function maybeProbe(url, day) {
+    if (config.probeThreshold >= 1) return;
+    const used = freeUsedToday(url, day);
+    if (used < config.freeCapPerProcess * config.probeThreshold) return;
+    const s = probeState.get(url);
+    if (s && s.day === day && (s.probing || s.spent)) return;
+
+    probeState.set(url, { day, probing: true, spent: false });
+    const probeUrl = url.endsWith('/') ? url : `${url}/`;
+    Promise.resolve()
+      .then(async () => {
+        const res = await httpProbe(probeUrl, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(4000),
+        });
+        const status = res && res.status;
+        const isSpent = status === 403 || status === 429 || status === 503;
+        probeState.set(url, { day, probing: false, spent: isSpent });
+        if (isSpent && config.logEnabled) {
+          log(`[WorkerBudget] ${day}: ${hostOf(url)} probe returned ${status} — marking spent for day`);
+        }
+      })
+      .catch(() => {
+        probeState.set(url, { day, probing: false, spent: false });
+      });
+  }
 
   function freeUsedToday(url, day) {
     const entry = freeState.get(url);
@@ -286,13 +335,17 @@ function createWorkerPool(options = {}) {
       : null;
 
     const available = config.freePool.filter(
-      (url) => (!exclude || !exclude.has(url)) && freeUsedToday(url, day) < config.freeCapPerProcess
+      (url) =>
+        (!exclude || !exclude.has(url)) &&
+        !isWorkerSpent(url, day) &&
+        freeUsedToday(url, day) < config.freeCapPerProcess
     );
 
     let chosen;
     if (available.length) {
       const url = available[Math.floor(random() * available.length)] || available[0];
       bumpFree(url, day);
+      maybeProbe(url, day);
       chosen = { url, tier: 'free' };
     } else if ((!exclude || !exclude.has(config.paidWorker)) && paidUsedThisMonth(month) < config.paidCapPerProcess) {
       bumpPaid(month);
@@ -344,6 +397,7 @@ function createWorkerPool(options = {}) {
         url,
         used: freeUsedToday(url, day),
         cap: config.freeCapPerProcess,
+        spent: isWorkerSpent(url, day),
       })),
       paid: {
         url: config.paidWorker,

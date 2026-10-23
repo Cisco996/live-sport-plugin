@@ -377,3 +377,87 @@ describe('HlsRewriteService — exhaustion fallback', () => {
     });
   });
 });
+
+describe('WorkerBudget — spent worker probing', () => {
+  test('probes worker with HEAD <worker>/ and marks spent on 429', async () => {
+    const probeCalls = [];
+    const httpProbe = jest.fn().mockImplementation(async (url) => {
+      probeCalls.push(url);
+      return { status: 429, ok: false };
+    });
+
+    const pool = createWorkerPool({
+      env: quietEnv,
+      httpProbe,
+      overrides: {
+        freeCapPerProcess: 2,
+        probeThreshold: 0.5,
+        paidCapPerProcess: 10,
+      },
+    });
+
+    // Pick 1: bumps usage to 1 (1 >= 2 * 0.5), triggering probe on chosen worker
+    const first = pool.pick('s1.image');
+    expect(first.tier).toBe('free');
+
+    // Wait for the fire-and-forget probe to complete
+    await new Promise((r) => setImmediate(r));
+
+    expect(probeCalls).toHaveLength(1);
+    expect(probeCalls[0]).toBe(first.url.endsWith('/') ? first.url : `${first.url}/`);
+
+    // Verify snapshot reflects spent
+    const snap = pool.snapshot();
+    const probedWorker = snap.free.find((w) => w.url === first.url);
+    expect(probedWorker.spent).toBe(true);
+
+    // Pick 2: the spent worker must be skipped
+    const second = pool.pick('s2.image');
+    expect(second.tier).toBe('free');
+    expect(second.url).not.toBe(first.url);
+
+    // Verify probe was called exactly once for that worker
+    expect(probeCalls).toHaveLength(1);
+  });
+
+  test('marks spent on 403 and 503 as well', async () => {
+    const statuses = [403, 503];
+    for (const status of statuses) {
+      const httpProbe = jest.fn().mockResolvedValue({ status, ok: false });
+      const pool = createWorkerPool({
+        env: quietEnv,
+        httpProbe,
+        overrides: { freeCapPerProcess: 2, probeThreshold: 0.5 },
+      });
+      const first = pool.pick('s1.image');
+      await new Promise((r) => setImmediate(r));
+      const probed = pool.snapshot().free.find((w) => w.url === first.url);
+      expect(probed.spent).toBe(true);
+    }
+  });
+
+  test('does not mark spent on 200 or network error', async () => {
+    const httpProbe = jest.fn().mockRejectedValue(new Error('connection timeout'));
+    const pool = createWorkerPool({
+      env: quietEnv,
+      httpProbe,
+      overrides: { freeCapPerProcess: 2, probeThreshold: 0.5 },
+    });
+    const first = pool.pick('s1.image');
+    await new Promise((r) => setImmediate(r));
+    const probed = pool.snapshot().free.find((w) => w.url === first.url);
+    expect(probed.spent).toBe(false);
+  });
+
+  test('threshold >= 1 disables probing', async () => {
+    const httpProbe = jest.fn();
+    const pool = createWorkerPool({
+      env: quietEnv,
+      httpProbe,
+      overrides: { freeCapPerProcess: 2, probeThreshold: 1.0 },
+    });
+    pool.pick('s1.image');
+    await new Promise((r) => setImmediate(r));
+    expect(httpProbe).not.toHaveBeenCalled();
+  });
+});
