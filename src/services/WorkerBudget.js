@@ -248,10 +248,13 @@ function createWorkerPool(options = {}) {
    * budget, which is what keeps sliding-window re-emissions from inflating the
    * counters. Pass null to spend budget unconditionally.
    *
+   * `options.exclude` can be an Array or Set of worker URLs to skip when selecting
+   * from available candidates.
+   *
    * Returns { url, tier: 'free'|'paid', reused } or null when both tiers are
    * exhausted.
    */
-  function pick(segmentKey) {
+  function pick(segmentKey, options = {}) {
     ensureTimer();
 
     const at = now();
@@ -267,8 +270,12 @@ function createWorkerPool(options = {}) {
       if (cached) dedupe.delete(segmentKey);
     }
 
+    const exclude = options && options.exclude
+      ? (options.exclude instanceof Set ? options.exclude : new Set(options.exclude))
+      : null;
+
     const available = config.freePool.filter(
-      (url) => freeUsedToday(url, day) < config.freeCapPerProcess
+      (url) => (!exclude || !exclude.has(url)) && freeUsedToday(url, day) < config.freeCapPerProcess
     );
 
     let chosen;
@@ -276,7 +283,7 @@ function createWorkerPool(options = {}) {
       const url = available[Math.floor(random() * available.length)] || available[0];
       bumpFree(url, day);
       chosen = { url, tier: 'free' };
-    } else if (paidUsedThisMonth(month) < config.paidCapPerProcess) {
+    } else if ((!exclude || !exclude.has(config.paidWorker)) && paidUsedThisMonth(month) < config.paidCapPerProcess) {
       bumpPaid(month);
       chosen = { url: config.paidWorker, tier: 'paid' };
       if (overflowDay !== day) {

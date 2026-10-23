@@ -175,6 +175,50 @@ describe('WorkerBudget — allocation', () => {
 
     pool.stop();
   });
+
+  test('filters out excluded workers from available candidates', () => {
+    const pool = createWorkerPool({
+      env: quietEnv,
+      overrides: { freeCapPerProcess: 10, paidCapPerProcess: 10 },
+    });
+
+    const tried = new Set();
+    const first = pool.pick(null, { exclude: tried });
+    expect(first.tier).toBe('free');
+    tried.add(first.url);
+
+    const second = pool.pick(null, { exclude: tried });
+    expect(second.tier).toBe('free');
+    expect(second.url).not.toBe(first.url);
+    tried.add(second.url);
+
+    const third = pool.pick(null, { exclude: tried });
+    expect(third.tier).toBe('free');
+    expect(third.url).not.toBe(first.url);
+    expect(third.url).not.toBe(second.url);
+  });
+
+  test('overflows to paid worker when all free workers are excluded', () => {
+    const pool = createWorkerPool({
+      env: quietEnv,
+      overrides: { freeCapPerProcess: 10, paidCapPerProcess: 10 },
+    });
+
+    const allFree = new Set(DEFAULT_FREE_POOL);
+    const pick = pool.pick(null, { exclude: allFree });
+    expect(pick.tier).toBe('paid');
+    expect(pick.url).toBe(DEFAULT_PAID_WORKER);
+  });
+
+  test('returns null when paid worker is also excluded', () => {
+    const pool = createWorkerPool({
+      env: quietEnv,
+      overrides: { freeCapPerProcess: 10, paidCapPerProcess: 10 },
+    });
+
+    const allWorkers = new Set([...DEFAULT_FREE_POOL, DEFAULT_PAID_WORKER]);
+    expect(pool.pick(null, { exclude: allWorkers })).toBeNull();
+  });
 });
 
 describe('WorkerBudget — dedupe of sliding-window re-emissions', () => {
