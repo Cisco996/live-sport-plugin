@@ -24,6 +24,16 @@ class SkTechProvider extends BaseProvider {
     this.name = 'SkTech';
     this.matchResolver = matchResolver;
     this.channelResolver = channelResolver;
+    this._cachedChannelEntities = null;
+    this._cachedChannelEntitiesTime = 0;
+  }
+
+  clearCache() {
+    this._cachedChannelEntities = null;
+    this._cachedChannelEntitiesTime = 0;
+    if (this.channelResolver && typeof this.channelResolver.clearCache === 'function') {
+      this.channelResolver.clearCache();
+    }
   }
 
   /**
@@ -68,11 +78,17 @@ class SkTechProvider extends BaseProvider {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Pillar 2: 24/7 Continuous TV Networks
+    // Pillar 2: 24/7 Continuous TV Networks (Dual-tiered cache: 5 minutes)
     // ──────────────────────────────────────────────────────────────────────────
     try {
-      const channels = await this.channelResolver.fetchChannels();
-      for (const ch of channels) {
+      const now = Date.now();
+      const CHANNEL_CACHE_TTL = 5 * 60 * 1000;
+      if (this._cachedChannelEntities && (now - this._cachedChannelEntitiesTime < CHANNEL_CACHE_TTL)) {
+        matches.push(...this._cachedChannelEntities);
+      } else {
+        const channelEntities = [];
+        const channels = await this.channelResolver.fetchChannels();
+        for (const ch of channels) {
         const ident = ChannelIdentityService.parseChannel(ch.title, {
           group: ch.group,
           logo: ch.logo
@@ -116,9 +132,13 @@ class SkTechProvider extends BaseProvider {
         entity.channelIdentityKey = identityKey;
         entity.channelNumber = channelNumber;
         entity.canonicalTitle = canonicalTitle;
-        matches.push(entity);
+        channelEntities.push(entity);
       }
-    } catch (err) {
+      this._cachedChannelEntities = channelEntities;
+      this._cachedChannelEntitiesTime = now;
+      matches.push(...channelEntities);
+    }
+  } catch (err) {
       console.warn(`[${this.name}] Failed to fetch 24/7 channels:`, err.message);
     }
 
