@@ -27,21 +27,6 @@ const { createWorkerPool } = require('./WorkerBudget');
 // WORKER_INSTANCE_COUNT note in WorkerBudget.js.
 const workerPool = createWorkerPool();
 
-// Kept as the free tier only: callers (CdnLiveProvider edge scraping) must not
-// burn the paid worker's monthly budget on speculative retries.
-const CF_IMAGE_WORKER_POOL = workerPool.config.freePool;
-
-/**
- * Compat shim for callers that only want "a worker URL".
- *
- * Spends budget without dedupe, so it is not used by the segment rewrite path;
- * rewriteHlsUri() goes through workerPool.pick() directly.
- */
-function getCfImageWorker() {
-  const pick = workerPool.pick(null);
-  return pick ? pick.url : null;
-}
-
 /**
  * Resolve a playlist URI against the manifest URL, inheriting the manifest's
  * query params (upstream CDNs key tokens in the query string).
@@ -114,8 +99,6 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
 }
 
 module.exports = {
-  CF_IMAGE_WORKER_POOL,
-  getCfImageWorker,
   resolveSegmentUrl,
   rewriteHlsUri,
   workerPool,

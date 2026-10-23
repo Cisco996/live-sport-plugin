@@ -249,3 +249,13 @@ Ratio = Cloudflare Requests / Cluster Total
 | Date | Worker | CF dashboard (req) | snapshot() used | Ratio | Action taken |
 |---|---|---|---|---|---|
 | 2026-10-23 | baseline | not yet measured | — | — | baseline — not yet measured |
+
+## Session Changes (2026-10-23)
+
+Hardened Cloudflare worker pool budget allocation and exhaustion protections:
+1. **Edge-scrape retry routing**: `CdnLiveProvider` 429/403 fallback routed through `workerPool.pick(null, { exclude: tried })` (up to 3 distinct free workers); paid worker strictly excluded from edge scraping.
+2. **Paid tier soft warning + hard ceiling**: Replaced rigid 95% paid cut with a soft warning threshold (`CF_PAID_SOFT_STOP_RATIO=0.95`, keeping `CF_PAID_CAP_RATIO` alias) and an absolute ceiling (`CF_PAID_HARD_LIMIT=20000000`), ensuring playback resilience without unbounded overage risk.
+3. **Zero server bandwidth enforcement**: Flipped `HLSCUNK_FALLBACK` default to `off` across code, docs, and `.env.example`, ensuring exhaustion emits direct CDN URLs and never relays video bytes through the VPS.
+4. **Spent worker active probing**: Added detached background `HEAD <worker>/` probing triggered at `CF_PROBE_THRESHOLD` (0.8 of daily cap). HTTP 403, 429, or 503 response marks that worker spent for the UTC day and immediately filters it out of `pick()`.
+5. **Observability endpoint**: Exposed `GET /api/worker-budget` mounted ahead of `/api` proxy middleware, returning process snapshot with optional `WORKER_BUDGET_TOKEN` gating.
+6. **Dead code removal**: Purged unused `getCfImageWorker()` and `CF_IMAGE_WORKER_POOL` export from `HlsRewriteService.js`.
