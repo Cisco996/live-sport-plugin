@@ -15,7 +15,10 @@ module.exports = {
         UV_THREADPOOL_SIZE: '64',
         PREWARM_MAX_MATCHES: '12',
         PREWARM_CRON_SCHEDULE: '*/3 * * * *',
-        WARP_PROXY_URL: 'socks5://127.0.0.1:40000'
+        WARP_PROXY_URL: 'socks5://127.0.0.1:40000',
+        // Cloudflare worker-budget counters live in process memory, so each
+        // cluster instance must be told how many siblings share the same caps.
+        WORKER_INSTANCE_COUNT: '2'
       }
     }
   ]

@@ -48,10 +48,18 @@ basketball, motorsport, cricket and networks catalogues:
 | Direct upstream CDN | 9 |
 | **VPS** | **0** |
 
-Latent risk: `src/services/HlsRewriteService.js` falls back to the VPS
-`/api/hlschunk` proxy for `.ts` and `.image` segments whenever
-`getCfImageWorker()` returns null. The pool currently holds five workers. **If
-that array is ever emptied, real video traffic starts flowing through the VPS.**
+Latent risk, now bounded: `src/services/HlsRewriteService.js` used to fall back
+to the VPS `/api/hlschunk` proxy for `.image` segments whenever
+`getCfImageWorker()` returned null, and the pool held seven interchangeable free
+workers that all exhausted at the same moment.
+
+The pool is now budgeted (`src/services/WorkerBudget.js`): six free workers
+(100k/day each, hard stop) are spent first, and the single paid worker on
+`nuvio-proxy2` (10M/month included, billed above that) takes the overflow. The
+paid worker is filtered out of `CF_IMAGE_WORKER_POOL` entirely, so it is
+unreachable by the random draw. `/api/hlschunk` is reached only when *both*
+tiers are out of budget; `HLSCUNK_FALLBACK=off` makes that case emit the
+upstream URL instead of relaying segment bytes through the VPS.
 
 ## The hub multiplier
 

@@ -10,27 +10,36 @@
  * this module existed the CF worker pool and the rewrite rules were duplicated
  * inline in routes/manifest.js and streams.js, which drifted apart once.
  *
- * Rewrite rules (mirrors what routes/manifest.js did inline):
+ * Rewrite rules:
  *  - .m3u8  → /api/manifest?url=...&referer=...&origin=...(+rckSuffix)
- *  - .image → random Cloudflare Worker (strips the 42-byte fake WebP/RIFF
- *             header Streamed.pk / TikTok CDN prepends), fallback /api/hlschunk
+ *  - .image → Cloudflare Worker from the budgeted pool (strips the 42-byte fake
+ *             WebP/RIFF header Streamed.pk / TikTok CDN prepends). Free workers
+ *             are spent first; the paid worker only takes the overflow.
+ *             Fallback /api/hlschunk, or the raw upstream URL when
+ *             HLSCUNK_FALLBACK=off.
  *  - disguised pure MPEG-TS (.png/.webp/.js, no .ts) → append '#.ts' hint
  *  - anything else → absolute URL as-is
  */
 
-const CF_IMAGE_WORKER_POOL = [
-  'https://nuvio-proxy.odedararaj456.workers.dev',
-  'https://nuvio-proxy2.rajodedara360.workers.dev',
-  'https://nuvio-proxy3.raj-odedara.workers.dev',
-  'https://spring-brook-5c1e.rajodedara456.workers.dev',
-  'https://falling-unit-ffa6.rajcfproxy1.workers.dev',
-  'https://falling-violet-3301.hansabenhodedara.workers.dev',
-  'https://nameless-dawn-2ab8.abhi-munot01.workers.dev',
-];
+const { createWorkerPool } = require('./WorkerBudget');
 
+// Process-wide pool. Budget state is per process by design — see the
+// WORKER_INSTANCE_COUNT note in WorkerBudget.js.
+const workerPool = createWorkerPool();
+
+// Kept as the free tier only: callers (CdnLiveProvider edge scraping) must not
+// burn the paid worker's monthly budget on speculative retries.
+const CF_IMAGE_WORKER_POOL = workerPool.config.freePool;
+
+/**
+ * Compat shim for callers that only want "a worker URL".
+ *
+ * Spends budget without dedupe, so it is not used by the segment rewrite path;
+ * rewriteHlsUri() goes through workerPool.pick() directly.
+ */
 function getCfImageWorker() {
-  if (!CF_IMAGE_WORKER_POOL.length) return null;
-  return CF_IMAGE_WORKER_POOL[Math.floor(Math.random() * CF_IMAGE_WORKER_POOL.length)];
+  const pick = workerPool.pick(null);
+  return pick ? pick.url : null;
 }
 
 /**
@@ -70,12 +79,22 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   }
 
   if (absoluteUrl.includes('.image')) {
-    const cfWorker = getCfImageWorker();
-    if (cfWorker) {
-      let workerChunkUrl = `${cfWorker}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
+    // Deduped by absolute URL: a live playlist re-emits its whole sliding
+    // window on every fetch, and those repeats must not spend budget twice.
+    const pick = workerPool.pick(absoluteUrl);
+
+    if (pick) {
+      let workerChunkUrl = `${pick.url}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
       if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
       if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
       return workerChunkUrl;
+    }
+
+    // Every free worker is at its daily cap and the paid worker is at its
+    // monthly budget. Emitting the upstream URL keeps the VPS out of the byte
+    // path; the player drops this segment instead of streaming it through us.
+    if (!workerPool.config.hlschunkFallback) {
+      return absoluteUrl;
     }
 
     let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
@@ -99,4 +118,5 @@ module.exports = {
   getCfImageWorker,
   resolveSegmentUrl,
   rewriteHlsUri,
+  workerPool,
 };
