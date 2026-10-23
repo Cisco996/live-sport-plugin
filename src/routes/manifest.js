@@ -143,7 +143,7 @@ router.get('/api/manifest', async (req, res) => {
               return resultLine;
           }
 
-          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix });
+          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix, absoluteAddonBaseUrl: getRequestBaseUrl(req) });
         });
 
         const rewrittenResult = rewritten.join('\n');

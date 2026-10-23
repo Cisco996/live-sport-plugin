@@ -72,7 +72,7 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   if (absoluteUrl.includes('.image')) {
     const cfWorker = getCfImageWorker();
     if (cfWorker) {
-      let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
+      let workerChunkUrl = `${cfWorker}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
       if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
       if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
       return workerChunkUrl;
