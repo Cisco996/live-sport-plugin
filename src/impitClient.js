@@ -78,6 +78,30 @@ function getProxyImpit(proxyUrl) {
   return _impitProxyInstance;
 }
 
+let _impitVanillaInstance;
+let _impitVanillaBornAt = 0;
+
+function getVanillaImpit() {
+  if (_impitVanillaInstance && Date.now() - _impitVanillaBornAt > IMPIT_RECYCLE_MS) {
+    console.log('[impitClient] recycling vanilla impit instance');
+    _impitVanillaInstance = undefined;
+    if (typeof global.gc === 'function') {
+      try { global.gc(); } catch (_) {}
+    }
+  }
+  if (_impitVanillaInstance !== undefined) return _impitVanillaInstance;
+  try {
+    const { Impit } = require('impit');
+    _impitVanillaInstance = new Impit();
+    _impitVanillaBornAt = Date.now();
+    console.log('[impitClient] vanilla impit client loaded successfully.');
+  } catch (e) {
+    _impitVanillaInstance = null;
+    console.warn(`[impitClient] vanilla impit unavailable (${e.message}).`);
+  }
+  return _impitVanillaInstance;
+}
+
 function isDamitvTarget(url) {
   if (!url || typeof url !== 'string') return false;
   return url.includes('damitv.st');
@@ -122,17 +146,19 @@ async function safeFetch(url, opts = {}) {
   const isDamitv = isDamitvTarget(url);
   const isDembed = isDembedTarget(url);
   const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
-  const impit = proxyUrl ? getProxyImpit(proxyUrl) : getImpit();
+  const impit = proxyUrl ? getProxyImpit(proxyUrl) : (isDamitv ? (getVanillaImpit() || getImpit()) : getImpit());
   const maxAttempts = Math.max(1, attempts);
 
   if (isDamitv) {
     const headerKeys = Object.keys(headers || {});
-    const hasUa = headerKeys.some(k => k.toLowerCase() === 'user-agent');
+    const uaKey = headerKeys.find(k => k.toLowerCase() === 'user-agent');
+    const currentUa = uaKey ? headers[uaKey] : '';
+    const hasValidUa = currentUa && !currentUa.includes('Chrome/127');
     const hasRef = headerKeys.some(k => k.toLowerCase() === 'referer');
     headers = {
-      ...(hasUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
-      ...(hasRef ? {} : { 'Referer': 'https://damitv.st/' }),
       ...headers,
+      ...(hasValidUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
+      ...(hasRef ? {} : { 'Referer': 'https://damitv.st/' }),
     };
   } else if (isDembed) {
     const headerKeys = Object.keys(headers || {});

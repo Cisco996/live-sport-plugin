@@ -702,7 +702,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       }
 
       // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time (for HLS)
-      if (!isMpd && !isMp4) {
+      if (!isMpd && !isMp4 && m3u8Parser && typeof m3u8Parser.parseManifestText === 'function') {
         const parsedQuality = m3u8Parser.parseManifestText(bodySample);
         if (parsedQuality) {
           if (parsedQuality.qualityTag) s.quality = parsedQuality.qualityTag;
