@@ -83,6 +83,11 @@ function isDamitvTarget(url) {
   return url.includes('damitv.st');
 }
 
+function isDembedTarget(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.includes('dembed.st');
+}
+
 // -- Shared undici keep-alive agent -------------------------------------------
 const _undiciAgent = new Agent({
   connect: { timeout: 20000, rejectUnauthorized: false },
@@ -115,6 +120,7 @@ async function safeFetch(url, opts = {}) {
   // Selective proxying: route DamiTV requests through local WARP SOCKS5 proxy if configured
   const warpProxyUrl = process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL;
   const isDamitv = isDamitvTarget(url);
+  const isDembed = isDembedTarget(url);
   const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
   const impit = proxyUrl ? getProxyImpit(proxyUrl) : getImpit();
   const maxAttempts = Math.max(1, attempts);
@@ -126,6 +132,17 @@ async function safeFetch(url, opts = {}) {
     headers = {
       ...(hasUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
       ...(hasRef ? {} : { 'Referer': 'https://damitv.st/' }),
+      ...headers,
+    };
+  } else if (isDembed) {
+    const headerKeys = Object.keys(headers || {});
+    const hasUa = headerKeys.some(k => k.toLowerCase() === 'user-agent');
+    const hasRef = headerKeys.some(k => k.toLowerCase() === 'referer');
+    const hasDest = headerKeys.some(k => k.toLowerCase() === 'sec-fetch-dest');
+    headers = {
+      ...(hasUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
+      ...(hasRef ? {} : { 'Referer': 'https://dlive.sx/' }),
+      ...(hasDest ? {} : { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'cross-site' }),
       ...headers,
     };
   }
@@ -297,4 +314,4 @@ function isImpitAvailable() {
   return getImpit() !== null;
 }
 
-module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget };
+module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget };
