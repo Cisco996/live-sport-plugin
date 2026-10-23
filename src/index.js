@@ -267,6 +267,17 @@ app.get('/api/provider-health', (req, res) => {
   });
 });
 
+app.get('/api/worker-budget', (req, res) => {
+  const expectedToken = process.env.WORKER_BUDGET_TOKEN;
+  if (expectedToken && req.query.token !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized', reason: 'invalid_token' });
+  }
+
+  const { workerPool } = require('./services/HlsRewriteService');
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(workerPool.snapshot());
+});
+
 app.get('/api/matches', (req, res) => {
   // Internal/debug surface: the configure page does not use it, but local helper
   // scripts do. Restrict to a direct local caller instead of removing it.
