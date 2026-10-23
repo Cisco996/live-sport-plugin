@@ -76,9 +76,26 @@ router.get('/api/manifest', async (req, res) => {
           if (!fresh || fresh === effectiveUrl) throw firstErr;
           
           console.log('[ManifestProxy] Upstream token expired — re-minted, retrying transparently');
+          let remintTtl = 150 * 1000;
+          try {
+            const uObj = new URL(fresh);
+            const token = uObj.searchParams.get('token');
+            if (token) {
+              const b64 = token.split('.')[0];
+              const decoded = Buffer.from(b64, 'base64').toString('utf8');
+              const parts = decoded.split('|');
+              if (parts.length >= 3 && /^\d+$/.test(parts[parts.length - 1])) {
+                const exp = parseInt(parts[parts.length - 1], 10);
+                const expMs = exp < 1e11 ? exp * 1000 : exp;
+                const rem = expMs - Date.now();
+                if (rem > 0) remintTtl = Math.min(remintTtl, Math.max(30000, rem - 30000));
+              }
+            }
+          } catch (_) {}
+          const remintExpiresAt = Date.now() + remintTtl;
           const subKey = getRemintCacheKey(rck, effectiveUrl || targetUrl);
-          if (subKey) remintCache.set(subKey, { freshUrl: fresh, expiresAt: Date.now() + 15 * 60 * 1000 });
-          remintCache.set(rck, { freshUrl: fresh, expiresAt: Date.now() + 15 * 60 * 1000 });
+          if (subKey) remintCache.set(subKey, { freshUrl: fresh, expiresAt: remintExpiresAt });
+          remintCache.set(rck, { freshUrl: fresh, expiresAt: remintExpiresAt });
           
           // Preserve the variant the player asked for (see mergeRemintedUrl).
           effectiveUrl = mergeRemintedUrl(targetUrl, fresh, rck);

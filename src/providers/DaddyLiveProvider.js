@@ -35,6 +35,18 @@ function extractTokenExpiry(url) {
       const num = parseInt(e, 10);
       return num < 1e11 ? num * 1000 : num;
     }
+    const token = u.searchParams.get('token');
+    if (token) {
+      const b64 = token.split('.')[0];
+      try {
+        const decoded = Buffer.from(b64, 'base64').toString('utf8');
+        const parts = decoded.split('|');
+        if (parts.length >= 3 && /^\d+$/.test(parts[parts.length - 1])) {
+          const num = parseInt(parts[parts.length - 1], 10);
+          return num < 1e11 ? num * 1000 : num;
+        }
+      } catch (_) {}
+    }
   } catch (_) {}
   return 0;
 }
@@ -438,6 +450,9 @@ class DaddyLiveProvider extends BaseProvider {
         headers: {
           'User-Agent': UA,
           'Referer': referer,
+          'Sec-Fetch-Dest': 'iframe',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'cross-site',
           'Accept': 'text/html,application/xhtml+xml,application/json,*/*;q=0.8'
         },
         signal: AbortSignal.timeout(6000)
@@ -934,6 +949,9 @@ class DaddyLiveProvider extends BaseProvider {
               'User-Agent': UA,
               'Referer': playerUrl,
               'Origin': base,
+              'Sec-Fetch-Dest': 'iframe',
+              'Sec-Fetch-Mode': 'navigate',
+              'Sec-Fetch-Site': 'cross-site',
               'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             },
             signal: AbortSignal.timeout(6000)
@@ -1002,18 +1020,22 @@ class DaddyLiveProvider extends BaseProvider {
       }));
     }
 
-    // Cache streams with TTL bounded by token expiry or default 5 minutes
-    const firstDirect = streams.find(s => s.url && s.url.includes('/api/manifest?'));
+    // Cache streams with TTL bounded by token expiry or default 2.5 minutes
+    const firstDirect = streams.find(s => s.url && (s.url.includes('/api/manifest?') || s.url.startsWith('http')));
     let tokenExp = 0;
     if (firstDirect) {
       try {
-        const uObj = new URL('http://localhost' + firstDirect.url);
-        tokenExp = extractTokenExpiry(uObj.searchParams.get('url'));
+        let target = firstDirect.url;
+        if (target.includes('/api/manifest?')) {
+          const uObj = new URL('http://localhost' + target);
+          target = uObj.searchParams.get('url') || target;
+        }
+        tokenExp = extractTokenExpiry(target);
       } catch (_) {}
     }
-    const defaultTtl = 5 * 60 * 1000;
+    const defaultTtl = 150 * 1000;
     const expiresAt = tokenExp && tokenExp > Date.now()
-      ? Math.min(tokenExp - 60000, Date.now() + defaultTtl)
+      ? Math.min(tokenExp - 45000, Date.now() + defaultTtl)
       : Date.now() + defaultTtl;
 
     if (this._decoded.size >= 500) {
