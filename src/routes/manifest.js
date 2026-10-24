@@ -15,7 +15,7 @@ const {
 const {
   readRck, getRemintCacheKey, remintCache, mergeRemintedUrl, isExpiryStatus, attemptRemint
 } = require('../remint');
-const { rewriteHlsUri } = require('../services/HlsRewriteService');
+const { rewriteHlsUri, rewriteHlsPlaylist } = require('../services/HlsRewriteService');
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
 
@@ -138,32 +138,12 @@ router.get('/api/manifest', async (req, res) => {
         }
         let injectedStart = out.includes('#EXT-X-START');
 
-        const lines = out.split('\n');
-        const rewritten = lines.map(line => {
-          const l = line.trim();
-
-          let resultLine = line;
-
-          if (!l) return resultLine;
-          
-          if (l.startsWith('#')) {
-              // Handle EXT-X-MAP:URI="relative.mp4"
-              if (l.startsWith('#EXT-X-MAP:')) {
-                  const uriMatch = l.match(/URI="([^"]+)"/);
-                  if (uriMatch) {
-                      try {
-                          const absUri = new URL(uriMatch[1], effectiveUrl).toString();
-                          resultLine = l.replace(uriMatch[1], absUri);
-                      } catch(e) {}
-                  }
-              }
-              return resultLine;
-          }
-
-          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix, absoluteAddonBaseUrl: getRequestBaseUrl(req) });
+        const rewrittenResult = rewriteHlsPlaylist(out, effectiveUrl, {
+          referer,
+          origin,
+          rckSuffix,
+          absoluteAddonBaseUrl: getRequestBaseUrl(req)
         });
-
-        const rewrittenResult = rewritten.join('\n');
         manifestCacheSet(cacheKey, rewrittenResult, dynamicTtl);
         return rewrittenResult;
       })().finally(() => {

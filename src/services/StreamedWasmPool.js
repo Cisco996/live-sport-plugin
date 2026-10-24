@@ -129,6 +129,15 @@ class StreamedWasmPool {
   }
 
   async resolveWasmStream(user, event, id, embedUrl, timeoutMs = 12000) {
+    if (typeof user === 'string' && (user.startsWith('http://') || user.startsWith('https://'))) {
+      embedUrl = user;
+      const match = embedUrl.match(/\/embed\/([^/?#]+)\/([^/?#]+)\/([^/?#]+)/i);
+      if (match) {
+        user = match[1];
+        event = match[2];
+        id = match[3];
+      }
+    }
     if (this.isDestroyed || this.workers.length === 0) {
       return null;
     }

@@ -311,17 +311,29 @@ describe('WorkerBudget — budget resets', () => {
   });
 });
 
-describe('HlsRewriteService — rewrite rules', () => {
-  test('routes .image segments through a worker', () => {
+describe('HlsRewriteService — zero-bandwidth byte-range 307 redirect (default)', () => {
+  test('routes cloaked .image segments to 307 redirect endpoint by default', () => {
     withServiceEnv({}, ({ rewriteHlsUri }) => {
+      const out = rewriteHlsUri('seg1.image', MANIFEST);
+      expect(out).toMatch(/^\/api\/hls\/resource\/[^/]+\/media\.ts\?psig=/);
+      expect(out).not.toContain('/api/hlschunk');
+    });
+  });
+});
+
+describe('HlsRewriteService — legacy worker pool rules (opt-out)', () => {
+  const LEGACY_OPT_OUT = { USE_TIKTOK_BYTERANGE_307: 'off' };
+
+  test('routes .image segments through a worker when byte-range redirect is off', () => {
+    withServiceEnv(LEGACY_OPT_OUT, ({ rewriteHlsUri }) => {
       const out = rewriteHlsUri('seg1.image', MANIFEST);
       expect(out).toMatch(/^https:\/\/[^/]+\/seg\.ts\?url=/);
       expect(out).not.toContain('/api/hlschunk');
     });
   });
 
-  test('keeps referer and origin on the worker URL', () => {
-    withServiceEnv({}, ({ rewriteHlsUri }) => {
+  test('keeps referer and origin on the worker URL when byte-range redirect is off', () => {
+    withServiceEnv(LEGACY_OPT_OUT, ({ rewriteHlsUri }) => {
       const out = rewriteHlsUri('seg1.image', MANIFEST, {
         referer: 'https://ref.example/',
         origin: 'https://origin.example',
@@ -351,7 +363,7 @@ describe('HlsRewriteService — rewrite rules', () => {
 describe('HlsRewriteService — exhaustion fallback', () => {
   // A huge instance count drives both per-process caps to ~0, so the pool is
   // exhausted after a few dozen emissions without needing 600k calls.
-  const TIGHT = { WORKER_INSTANCE_COUNT: '200000' };
+  const TIGHT = { WORKER_INSTANCE_COUNT: '200000', USE_TIKTOK_BYTERANGE_307: 'off' };
 
   test('emits the upstream URL by default on exhaustion', () => {
     withServiceEnv(TIGHT, ({ rewriteHlsUri, workerPool }) => {

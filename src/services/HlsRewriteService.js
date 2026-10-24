@@ -3,29 +3,49 @@
 /**
  * HlsRewriteService.js
  *
- * Single source of truth for HLS segment/variant URI rewriting.
+ * Single source of truth for HLS segment/variant URI rewriting and playlist transformation.
  *
- * Both /api/manifest (playlist proxy) and the speed probe in streams.js must
- * build the exact URL a player would use for a given playlist entry. Before
- * this module existed the CF worker pool and the rewrite rules were duplicated
- * inline in routes/manifest.js and streams.js, which drifted apart once.
- *
- * Rewrite rules:
+ * Architecture:
  *  - .m3u8  → /api/manifest?url=...&referer=...&origin=...(+rckSuffix)
- *  - .image → Cloudflare Worker from the budgeted pool (strips the 42-byte fake
- *             WebP/RIFF header Streamed.pk / TikTok CDN prepends). Free workers
- *             are spent first; the paid worker only takes the overflow.
- *             Fallback /api/hlschunk, or the raw upstream URL when
- *             HLSCUNK_FALLBACK=off.
+ *  - TikTok / ByteDance cloaked segments (.image / ~tplv-obj / tiktokcdn):
+ *    Zero-Bandwidth Byte-Range exploit:
+ *    1. Injects `#EXT-X-BYTERANGE:<length>@42`
+ *    2. Rewrites segment URI to `/api/hls/resource/<token>/media.ts?psig=<hmac>`
+ *    3. The 307 endpoint immediately redirects the player's Range request directly to TikTok CDN.
+ *    4. TikTok CDN slices off the 42 fake WebP bytes at the CDN edge!
+ *       Net VPS bandwidth bleed: 0 KB/s.
  *  - disguised pure MPEG-TS (.png/.webp/.js, no .ts) → append '#.ts' hint
  *  - anything else → absolute URL as-is
  */
 
 const { createWorkerPool } = require('./WorkerBudget');
+const byteRangeSigner = require('./ByteRangeSigner');
+const segmentLengthService = require('./SegmentLengthService');
 
-// Process-wide pool. Budget state is per process by design — see the
-// WORKER_INSTANCE_COUNT note in WorkerBudget.js.
+// Legacy fallback worker pool (for explicit opt-out or testing)
 const workerPool = createWorkerPool();
+
+/**
+ * Detect whether a segment URL is a TikTok / ByteDance cloaked segment (WebP with MPEG-TS).
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isTikTokCloakedSegment(url) {
+  if (!url || typeof url !== 'string') return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('.image') ||
+    lower.includes('tplv-obj') ||
+    lower.includes('tiktokcdn') ||
+    lower.includes('byteoversea') ||
+    lower.includes('ibytedtos') ||
+    lower.includes('byteimg') ||
+    lower.includes('bytegoofy') ||
+    lower.includes('cowedd4855ws') ||
+    lower.includes('bytedance')
+  );
+}
 
 /**
  * Resolve a playlist URI against the manifest URL, inheriting the manifest's
@@ -49,6 +69,22 @@ function resolveSegmentUrl(segmentUri, manifestUrl) {
 }
 
 /**
+ * Build the signed 307 redirect URL for a cloaked TikTok segment.
+ */
+function buildByteRangeRedirectUrl(absoluteUrl, opts = {}) {
+  const { referer = '', origin = '', absoluteAddonBaseUrl = '' } = opts;
+  const { token, psig } = byteRangeSigner.encodeSegmentToken({
+    url: absoluteUrl,
+    referer,
+    origin,
+    prefixBytes: 42
+  });
+
+  const relativePath = `/api/hls/resource/${token}/media.ts?psig=${encodeURIComponent(psig)}`;
+  return absoluteAddonBaseUrl ? new URL(relativePath, absoluteAddonBaseUrl).toString() : relativePath;
+}
+
+/**
  * Rewrite one playlist entry into the URL the player should fetch.
  */
 function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
@@ -63,33 +99,32 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     return absoluteAddonBaseUrl ? new URL(manifestPath, absoluteAddonBaseUrl).toString() : manifestPath;
   }
 
-  if (absoluteUrl.includes('.image')) {
-    // Deduped by absolute URL: a live playlist re-emits its whole sliding
-    // window on every fetch, and those repeats must not spend budget twice.
-    const pick = workerPool.pick(absoluteUrl);
+  if (isTikTokCloakedSegment(absoluteUrl)) {
+    // If explicitly disabled via environment variable, use legacy CF worker budget pool
+    if (process.env.USE_TIKTOK_BYTERANGE_307 === 'off') {
+      const pick = workerPool.pick(absoluteUrl);
+      if (pick) {
+        let workerChunkUrl = `${pick.url}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
+        if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
+        if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
+        return workerChunkUrl;
+      }
 
-    if (pick) {
-      let workerChunkUrl = `${pick.url}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
-      if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
-      if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
-      return workerChunkUrl;
+      if (!workerPool.config.hlschunkFallback) {
+        return absoluteUrl;
+      }
+
+      let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
+      if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
+      if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+      return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
     }
 
-    // Every free worker is at its daily cap and the paid worker is at its
-    // monthly budget. Emitting the upstream URL keeps the VPS out of the byte
-    // path; the player drops this segment instead of streaming it through us.
-    if (!workerPool.config.hlschunkFallback) {
-      return absoluteUrl;
-    }
-
-    let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
-    if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
-    if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
-    return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
+    // Default: High-performance Zero-Bandwidth Byte-Range 307 Redirect
+    return buildByteRangeRedirectUrl(absoluteUrl, opts);
   }
 
   // Plain MPEG-TS segments stream directly from the upstream CDN (0 VPS bandwidth bleeding).
-
   const isPureDisguisedTs = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js');
   if (isPureDisguisedTs && !absoluteUrl.includes('.ts')) {
     return absoluteUrl + '#.ts';
@@ -98,8 +133,101 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   return absoluteUrl;
 }
 
+/**
+ * Rewrite a full HLS playlist manifest text:
+ * - Detects #EXTINF segment duration
+ * - Injects `#EXT-X-BYTERANGE:<length>@42` above cloaked TikTok segments
+ * - Rewrites segment URIs to 307 redirect endpoints
+ * - Preserves all other tags (#EXT-X-MAP, #EXT-X-STREAM-INF, etc.)
+ *
+ * @param {string} manifestBody
+ * @param {string} manifestUrl
+ * @param {Object} [opts={}]
+ * @returns {string}
+ */
+function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
+  const { referer = '', origin = '', bitrate } = opts;
+  const lines = String(manifestBody).split('\n');
+  const rewritten = [];
+  let currentDuration = null;
+  let hasPrecedingByteRange = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      rewritten.push(line);
+      continue;
+    }
+
+    if (trimmed.startsWith('#')) {
+      if (trimmed.startsWith('#EXTINF:')) {
+        const durMatch = trimmed.match(/^#EXTINF:([0-9.]+)/i);
+        if (durMatch) {
+          currentDuration = parseFloat(durMatch[1]);
+        }
+        hasPrecedingByteRange = false;
+      } else if (trimmed.startsWith('#EXT-X-BYTERANGE:')) {
+        hasPrecedingByteRange = true;
+      } else if (trimmed.startsWith('#EXT-X-MAP:')) {
+        const uriMatch = trimmed.match(/URI="([^"]+)"/);
+        if (uriMatch) {
+          try {
+            const absUri = new URL(uriMatch[1], manifestUrl).toString();
+            rewritten.push(trimmed.replace(uriMatch[1], absUri));
+            continue;
+          } catch (_) {}
+        }
+      }
+      rewritten.push(line);
+      continue;
+    }
+
+    // URI line
+    const absoluteUrl = resolveSegmentUrl(trimmed, manifestUrl);
+
+    if (absoluteUrl.includes('.m3u8')) {
+      rewritten.push(rewriteHlsUri(trimmed, manifestUrl, opts));
+      currentDuration = null;
+      hasPrecedingByteRange = false;
+      continue;
+    }
+
+    if (isTikTokCloakedSegment(absoluteUrl)) {
+      if (process.env.USE_TIKTOK_BYTERANGE_307 === 'off') {
+        rewritten.push(rewriteHlsUri(trimmed, manifestUrl, opts));
+      } else {
+        if (!hasPrecedingByteRange) {
+          const segmentLength = segmentLengthService.getSegmentLength(absoluteUrl, {
+            duration: currentDuration,
+            bitrate,
+            referer,
+            origin
+          });
+          rewritten.push(`#EXT-X-BYTERANGE:${segmentLength}@42`);
+        }
+        rewritten.push(buildByteRangeRedirectUrl(absoluteUrl, opts));
+      }
+      currentDuration = null;
+      hasPrecedingByteRange = false;
+      continue;
+    }
+
+    // Standard / direct segment
+    rewritten.push(rewriteHlsUri(trimmed, manifestUrl, opts));
+    currentDuration = null;
+    hasPrecedingByteRange = false;
+  }
+
+  return rewritten.join('\n');
+}
+
 module.exports = {
   resolveSegmentUrl,
   rewriteHlsUri,
+  rewriteHlsPlaylist,
+  isTikTokCloakedSegment,
+  buildByteRangeRedirectUrl,
   workerPool,
 };

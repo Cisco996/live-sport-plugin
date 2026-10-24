@@ -800,6 +800,7 @@ app.get('/img', async (req, res) => {
 // absent, all fetches silently use undici — streams continue to work.
 app.use(require('./routes/streamProxy'));
 app.use(require('./routes/manifest'));
+app.use(require('./routes/hlsResource'));
 app.use(require('./routes/embed'));
 // Mount the HLS Video Proxy (routes to the internal resolver on port RESOLVER_PORT)
 app.use('/api', createProxyMiddleware({
@@ -856,12 +857,12 @@ app.use((req, res, next) => {
         const rewriteUrl = (url) => {
           if (!url || typeof url !== 'string') return url;
           // Relative URLs
-          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/posters') || url.startsWith('/donate')) {
+          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/api/hls') || url.startsWith('/hls') || url.startsWith('/posters') || url.startsWith('/donate')) {
             modified = true;
             return `${currentBaseUrl}${url}`;
           }
           // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
           if (match) {
             modified = true;
             return `${currentBaseUrl}${match[1]}`;
