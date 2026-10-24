@@ -34,6 +34,7 @@ const HockeyReplaysProvider = require('./providers/HockeyReplaysProvider');
 const MlbLiveProvider = require('./providers/MlbLiveProvider');
 const VavooProvider = require('./providers/VavooProvider');
 const Ak47LiveProvider = require('./providers/Ak47LiveProvider');
+const LeafProvider = require('./providers/LeafProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 
@@ -87,6 +88,7 @@ container.register({
   mlbLiveProvider: asClass(MlbLiveProvider).singleton(),
   vavooProvider: asClass(VavooProvider).singleton(),
   ak47LiveProvider: asClass(Ak47LiveProvider).singleton(),
+  leafProvider: asClass(LeafProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 
