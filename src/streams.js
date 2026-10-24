@@ -25,6 +25,7 @@ function isEventStreamSource(src) {
 }
 
 const SOURCE_PRIORITY = {
+  leaf: 1,
   daddylive: 1,
   vavoo: 2,
   sktech: 2,
@@ -54,8 +55,8 @@ const SOURCE_PRIORITY = {
 };
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf'];
 
 function isReplaySource(sourceName) {
   return KNOWN_REPLAY_SOURCES.includes(sourceName);
@@ -195,6 +196,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'ak47live') {
     const provider = container.resolve('ak47LiveProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'leaf') {
+    const provider = container.resolve('leafProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -1531,7 +1535,8 @@ function formatChannelStreamTitle(s, match, providerNameOverride, countryInfo, q
     sktech: 'SKTech',
     vavoo: 'Vavoo',
     ppvst: 'PPV.st',
-    ak47live: 'AK47Live'
+    ak47live: 'AK47Live',
+    leaf: 'Leaf'
   };
 
   const srcKey = s._source || s.sourceName || (s.name && s.name.toLowerCase());
