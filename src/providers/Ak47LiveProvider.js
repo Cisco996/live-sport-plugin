@@ -426,7 +426,49 @@ class Ak47LiveProvider extends BaseProvider {
             if (selected) {
               channelLabel = selected.name ? selected.name.trim() : channelLabel;
 
-              // Zero-DASH / DRM Enforcement: Drop any DRM or DASH stream
+              // ClearKey DASH (.mpd + 16-byte hex key): convert to zero-bandwidth
+              // HLS via /api/dash — segments stream directly from the upstream CDN.
+              // AK47 feeds carry the key as api:"<kid>:<key>" (same format as SK Tech);
+              // key/kid fields are honoured too when present.
+              const linkParts = String(selected.link || '').split('|');
+              const dashLink = linkParts[0].trim();
+              let clearKey = '';
+              let clearKid = '';
+              if (typeof selected.api === 'string' && selected.api.includes(':')) {
+                const apiParts = selected.api.trim().split(':');
+                clearKid = apiParts[0].trim();
+                clearKey = apiParts[1].trim();
+              } else {
+                clearKey = String(selected.key || '').trim();
+                clearKid = String(selected.kid || '').trim();
+              }
+              if (/^[0-9a-fA-F]{32}$/.test(clearKey) && /\.mpd(\?|$)/i.test(dashLink)) {
+                const dashHeaders = { 'User-Agent': DEFAULT_UA };
+                for (const pair of linkParts.slice(1).join('|').split('&')) {
+                  const eqIdx = pair.indexOf('=');
+                  if (eqIdx !== -1 && pair.substring(0, eqIdx).trim().toLowerCase() === 'user-agent') {
+                    dashHeaders['User-Agent'] = pair.substring(eqIdx + 1).trim();
+                  }
+                }
+
+                const payload = Buffer.from(JSON.stringify({
+                  mpdUrl: dashLink,
+                  key: clearKey.toLowerCase(),
+                  kid: clearKid.toLowerCase(),
+                  headers: dashHeaders
+                })).toString('base64url');
+
+                return [new StreamEntity({
+                  name: 'Ak47Live',
+                  title: `[${channelLabel}] ${matchTitle || 'Live Event'} (1080p FHD)`,
+                  url: `${BASE_URL}/api/dash/index.m3u8?d=${payload}`,
+                  behaviorHints: { notWebReady: false },
+                  resolution: 'FHD'
+                })];
+              }
+
+              // Zero-DASH / DRM Enforcement: Drop any remaining DRM or DASH stream
+              // (Widevine/PlayReady without a usable ClearKey, malformed keys).
               if (selected.drm_scheme || selected.key || selected.kid) {
                 console.warn(`[${this.name}] Dropped DASH / DRM stream: ${channelLabel}`);
                 return [];

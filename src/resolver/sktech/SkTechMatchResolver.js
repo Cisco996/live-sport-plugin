@@ -2,6 +2,7 @@
 
 const SkTechCrypto = require('./SkTechCrypto');
 const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
+const { BASE_URL } = require('../../config');
 
 const BASE_API_URL = 'https://dk01-64n.pages.dev/';
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -448,25 +449,33 @@ class SkTechMatchResolver {
           score: 95
         });
       }
-      // Case 3: Akamai / AWS DASH with ClearKey
-      else if (parsed.url.includes('.mpd') || api.includes(':')) {
-        const clearkeyObj = api ? SkTechCrypto.formatClearKey(api) : undefined;
-        const streamObj = {
-          name: '⚡ Direct Stream',
-          title: `SK Tech (${serverName ? `${serverName} • DASH` : 'DASH ClearKey'})`,
-          url: parsed.url,
-          behaviorHints: {
-            notWebReady: true,
-            proxyHeaders: {
-              request: parsed.headers
-            }
-          },
-          score: 75
-        };
-        if (clearkeyObj) {
-          streamObj.clearkey = clearkeyObj;
+      // Case 3: Akamai / AWS DASH with ClearKey → zero-bandwidth HLS conversion
+      else if (parsed.url.includes('.mpd') && api && api.includes(':')) {
+        const parts = api.trim().split(':');
+        const kid = (parts[0] || '').trim();
+        const key = (parts[1] || '').trim();
+
+        if (/^[0-9a-fA-F]{32}$/.test(key)) {
+          const payload = Buffer.from(JSON.stringify({
+            mpdUrl: parsed.url,
+            key: key.toLowerCase(),
+            kid: kid.toLowerCase(),
+            headers: parsed.headers || {}
+          })).toString('base64url');
+
+          dashStreams.push({
+            name: '⚡ Direct Stream',
+            title: `SK Tech (${serverName ? `${serverName} • 1080p FHD` : '1080p FHD'})`,
+            url: `${BASE_URL}/api/dash/index.m3u8?d=${payload}`,
+            behaviorHints: { notWebReady: false },
+            score: 95
+          });
         }
-        dashStreams.push(streamObj);
+        // .mpd with a malformed key stays unplayable — dropped, never emitted raw
+      }
+      // Case 3b: DASH without any ClearKey cannot be played natively — skip
+      else if (parsed.url.includes('.mpd')) {
+        continue;
       }
       // Case 4: Standard Direct HLS (.m3u8)
       else if (parsed.url.includes('.m3u8') || parsed.url.includes('amagi.tv') || parsed.url.includes('redbull.tv')) {

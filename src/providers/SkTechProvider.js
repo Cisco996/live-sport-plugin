@@ -208,8 +208,10 @@ class SkTechProvider extends BaseProvider {
     for (const s of rawCandidates) {
       if (!s.url) continue;
 
-      // Filter out any internal proxy routes if accidentally emitted
-      if (s.url.includes('localhost') || s.url.includes('/api/manifest')) {
+      // Filter out any internal proxy routes if accidentally emitted.
+      // /api/dash URLs are intentional zero-bandwidth DASH→HLS endpoints — keep them.
+      const isDashHlsStream = s.url.includes('/api/dash/');
+      if (!isDashHlsStream && (s.url.includes('localhost') || s.url.includes('/api/manifest'))) {
         continue;
       }
 
@@ -219,12 +221,14 @@ class SkTechProvider extends BaseProvider {
         url: s.url,
         resolution: s.resolution || 'HD',
         score: s.score || 85,
-        behaviorHints: {
-          notWebReady: true,
-          proxyHeaders: s.behaviorHints?.proxyHeaders || {
-            request: s.headers || {}
-          }
-        },
+        behaviorHints: isDashHlsStream
+          ? { notWebReady: false }
+          : {
+              notWebReady: true,
+              proxyHeaders: s.behaviorHints?.proxyHeaders || {
+                request: s.headers || {}
+              }
+            },
         clearkey: s.clearkey || undefined,
         language: s.language || src.language || undefined
       }));

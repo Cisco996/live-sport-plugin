@@ -429,6 +429,108 @@ http://193.47.62.1:8080/live/game.m3u8
       });
       expect(wasmRes).toEqual([]);
     });
+
+    describe('ClearKey DASH → Zero-Bandwidth HLS Conversion', () => {
+      const KEY_HEX = '567c863bc12eb74788ea74888c042e1b';
+      const KID_HEX = 'f3df7843080ae743bf865dc5fdf64c68';
+      const MPD_URL = 'https://otte.cache.aiv-cdn.net/bom-nitro/out/v1/f7f0da1ee112481ca0024e6d4dd97f4a/cenc.mpd';
+      const PIPED_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
+
+      function encryptAk47(obj) {
+        const key = Buffer.from('az1sUE8zNnNUVXpN', 'ascii');
+        const iv = Buffer.from('dz00QVhsNmZZU0Fw', 'ascii');
+        const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+        cipher.setAutoPadding(true);
+        const enc = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(obj), 'utf8')), cipher.final()]);
+        const b64 = enc.toString('base64');
+        const rev = Buffer.from(b64, 'ascii').reverse();
+        for (let i = 0; i < rev.length - 1; i += 2) {
+          const tmp = rev[i];
+          rev[i] = rev[i + 1];
+          rev[i + 1] = tmp;
+        }
+        return rev.toString('base64');
+      }
+
+      test('resolves real-format pro entries (api:"kid:key", piped UA) into /api/dash HLS StreamEntities', async () => {
+        jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+          status: 200,
+          text: async () => encryptAk47([
+            {
+              name: 'TNT2UK SPORTS FHD',
+              link: `${MPD_URL}|user-agent=${PIPED_UA}`,
+              scheme: 0,
+              api: `${KID_HEX}:${KEY_HEX}`,
+              tokenApi: ''
+            }
+          ])
+        });
+
+        const resolved = await provider.resolveStream('pro/bein.txt#0', 'football', 'Japan vs Venezuela', {
+          id: 'pro/bein.txt#0',
+          linksPath: 'pro/bein.txt',
+          streamIndex: 0,
+          channelName: 'TNT2UK SPORTS FHD'
+        });
+
+        expect(resolved.length).toBe(1);
+        const stream = resolved[0];
+        expect(stream).toBeInstanceOf(StreamEntity);
+        expect(stream.name).toBe('Ak47Live');
+        expect(stream.title).toContain('[TNT2UK SPORTS FHD]');
+        expect(stream.title).toContain('Japan vs Venezuela');
+        expect(stream.title).toContain('FHD');
+        expect(stream.url).toMatch(/\/api\/dash\/index\.m3u8\?d=.+$/);
+        expect(stream.behaviorHints.notWebReady).toBe(false);
+
+        const payload = JSON.parse(Buffer.from(stream.url.split('d=')[1], 'base64url').toString('utf8'));
+        expect(payload.mpdUrl).toBe(MPD_URL);
+        expect(payload.key).toBe(KEY_HEX);
+        expect(payload.kid).toBe(KID_HEX);
+        expect(payload.headers['User-Agent']).toBe(PIPED_UA);
+      });
+
+      test('also honours legacy key/kid fields and strips piped link suffixes', async () => {
+        jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+          status: 200,
+          text: async () => encryptAk47([
+            { name: 'TSN FHD', link: `${MPD_URL}|Referer=https://ak.example/`, key: KEY_HEX, kid: KID_HEX }
+          ])
+        });
+
+        const resolved = await provider.resolveStream('pro/tsn.txt#0', 'football', 'Match', {
+          id: 'pro/tsn.txt#0',
+          linksPath: 'pro/tsn.txt',
+          streamIndex: 0
+        });
+
+        expect(resolved.length).toBe(1);
+        const payload = JSON.parse(Buffer.from(resolved[0].url.split('d=')[1], 'base64url').toString('utf8'));
+        expect(payload.mpdUrl).toBe(MPD_URL); // no |Referer=... suffix
+        expect(payload.key).toBe(KEY_HEX);
+        expect(payload.kid).toBe(KID_HEX);
+      });
+
+      test('still drops DRM .mpd entries whose key is not a valid 16-byte hex string', async () => {
+        jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+          status: 200,
+          text: async () => encryptAk47([
+            { name: 'WIDEVINE ONLY', link: MPD_URL, drm_scheme: 'widevine' },
+            { name: 'BAD KEY', link: MPD_URL, api: 'zzz:not-hex' },
+            { name: 'KEY NO MPD', link: 'https://cdn.example.com/live.m3u8', key: KEY_HEX, kid: KID_HEX }
+          ])
+        });
+
+        for (const idx of [0, 1, 2]) {
+          const resolved = await provider.resolveStream(`pro/drm.txt#${idx}`, 'football', 'Match', {
+            id: `pro/drm.txt#${idx}`,
+            linksPath: 'pro/drm.txt',
+            streamIndex: idx
+          });
+          expect(resolved).toEqual([]);
+        }
+      });
+    });
   });
 
   describe('Container & System Integration', () => {

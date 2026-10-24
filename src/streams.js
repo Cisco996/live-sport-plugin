@@ -461,6 +461,18 @@ function getSpeedLabel(speedScore) {
   return 'Slow';
 }
 
+function getBitrateLabel(bitrate) {
+  if (!bitrate) return '';
+  if (typeof bitrate === 'string') return bitrate;
+  // Some providers store raw bps; render it as a label so the UI never
+  // shows "1080p · 6200000". Same format as the measured-bitrate label above.
+  const n = Number(bitrate);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return n >= 1000000
+    ? `${(n / 1000000).toFixed(1)} Mbps`
+    : `${Math.round(n / 1000)} kbps`;
+}
+
 
 // --- Stream Health Verification ---
 // Pings each direct stream once and drops dead ones (404/403/5xx, or 200 bodies
@@ -1285,7 +1297,9 @@ async function handleStream(type, id, config) {
       const match = originalTitle.match(/\(([^)]+)\)/);
       if (match && match[1]) {
         const inner = match[1];
-        if (!inner.match(/^[0-9]{3,4}p$/i) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
+        // Skip resolution/bitrate placeholders and Auto/stream markers — they
+        // are quality tags, not channel names (e.g. Leaf's "(FHD)").
+        if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
           channelName = inner;
         }
       } else if (!originalTitle.includes('Stream') && !originalTitle.includes('Auto')) {
@@ -1382,7 +1396,8 @@ async function handleStream(type, id, config) {
 
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
-    const bitrateText = s.bitrate ? ` · ${s.bitrate}` : '';
+    const bitrateLabel = getBitrateLabel(s.bitrate);
+    const bitrateText = bitrateLabel ? ` · ${bitrateLabel}` : '';
 
     const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}${backupTag}${timeshiftTag}` : `${backupTag}${timeshiftTag}`;

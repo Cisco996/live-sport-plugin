@@ -157,19 +157,33 @@ class LeafProvider extends BaseProvider {
         quality = 'HD';
       }
 
-      // Bitrate parsing
+      // Bitrate as display label ("6.2 Mbps") matching the addon-wide
+      // convention in streams.js — raw bps renders as "6200000" in the UI.
       let bitrate = null;
       const bitrateMatch = rawTitle.match(/~?([\d.]+)\s*Mbps/i);
       if (bitrateMatch) {
-        bitrate = Math.round(parseFloat(bitrateMatch[1]) * 1000000);
+        const bps = Math.round(parseFloat(bitrateMatch[1]) * 1000000);
+        bitrate = bps >= 1000000
+          ? `${(bps / 1000000).toFixed(1)} Mbps`
+          : `${Math.round(bps / 1000)} kbps`;
       }
 
-      // Channel label cleanup
-      let channelLabel = rawName.replace(/^🔒?\s*Leaf\s*\([^)]*\)\s*·\s*/i, '').trim();
+      // Channel label cleanup: strip the upstream "🔒 Leaf (Strong) ·" branding
+      // entirely (no lock emoji, no "Strong") plus parenthetical junk like
+      // "(A)..." so streams.js' first-parens extraction picks the broadcaster.
+      let channelLabel = rawName
+        .replace(/🔒/g, '')
+        .replace(/^\s*Leaf\b\s*(?:\([^)]*\))?\s*[·:\-–]?\s*/i, '')
+        .replace(/\s*\([^)]*\)/g, '')
+        .replace(/\bStrong\b/gi, '')
+        .replace(/^\s*[:\-–]\s*/, '')
+        .replace(/\s*\.{2,}\s*$/, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 
       resolved.push(new StreamEntity({
-        name: `Leaf (Strong) [${quality}]`,
-        title: channelLabel ? `${channelLabel} (${quality})` : `Leaf · ${quality}`,
+        name: `Leaf [${quality}]`,
+        title: channelLabel ? `(${channelLabel}) ${quality}` : `Leaf Stream · ${quality}`,
         url: directUrl,
         resolution,
         quality,

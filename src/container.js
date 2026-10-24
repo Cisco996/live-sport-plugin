@@ -37,6 +37,7 @@ const Ak47LiveProvider = require('./providers/Ak47LiveProvider');
 const LeafProvider = require('./providers/LeafProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
+const DashToHlsService = require('./services/DashToHlsService');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -53,6 +54,7 @@ container.register({
   streamScorer: asClass(StreamScoringService).singleton(),
   streamResolveCache: asValue(new StreamResolveCache()),
   streamedWasmPool: asValue(StreamedWasmPool),
+  dashToHlsService: asClass(DashToHlsService).singleton(),
   providerHealthService: asClass(ProviderHealthService).singleton(),
   teamLogoService: asClass(TeamLogoService).singleton(),
   broadcasterMatchService: asValue(new BroadcasterMatchService()),
