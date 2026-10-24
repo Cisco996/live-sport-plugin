@@ -111,13 +111,13 @@ class TimStreamsProvider extends BaseProvider {
    */
   decodeObfuscatedScript(html) {
     // 1. Find the obfuscated array
-    const arrMatch = html.match(/var\s+\w+\s*=\s*\[([\d,]+)\]/);
+    const arrMatch = html.match(/var\s+\w+\s*=\s*\[([\d,\s]+)\]/);
     if (!arrMatch) return null;
     const arr = arrMatch[1].split(',').map(Number);
     
     // 2. Find the character decoding loop formula to get the variable names
     // Typically: String.fromCharCode(((_so7[_ix3]^_bw9)-_jr2+256)%256) or &255
-    const loopMatch = html.match(/String\.fromCharCode\(\(\([\w\[\]]+\s*\^\s*(\w+)\)\s*-\s*(\w+)\s*\+\s*256\)\s*(?:%|&)\s*(?:256|255)\)/);
+    const loopMatch = html.match(/String\.fromCharCode\(\s*\(+[^\^]+\^\s*(\w+)\s*\)\s*-\s*(\w+)\s*\+\s*256\s*\)\s*(?:%|&)\s*(?:256|255)\)/);
     if (!loopMatch) return null;
     
     const xorVarName = loopMatch[1];
@@ -162,11 +162,43 @@ class TimStreamsProvider extends BaseProvider {
       const decoded = this.decodeObfuscatedScript(html);
       if (!decoded) return null;
 
-      const urlMatch = decoded.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8/);
-      if (!urlMatch) return null;
+      let m3u8Url = null;
+      const urlMatch = decoded.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
+      if (urlMatch) {
+        m3u8Url = urlMatch[0];
+      } else {
+        const loadMatch = decoded.match(/loadStreamUrl\s*\(\s*["']([^"']+)["']/);
+        if (loadMatch) {
+          const tokenUrl = loadMatch[1];
+          const tokenRes = await this.proxyFetch(tokenUrl, {
+            headers: {
+              'Referer': embedUrl,
+              'Origin': new URL(embedUrl).origin,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+            },
+            signal: AbortSignal.timeout(10000)
+          });
+          if (tokenRes.ok) {
+            const buf = Buffer.from(await tokenRes.arrayBuffer());
+            if (buf.length > 1) {
+              const tk = tokenUrl.substring(tokenUrl.lastIndexOf('/') + 1);
+              const s = buf[0];
+              let decrypted = '';
+              for (let i = 1; i < buf.length; i++) {
+                decrypted += String.fromCharCode(buf[i] ^ tk.charCodeAt((i - 1) % tk.length) ^ ((s + i - 1) & 255));
+              }
+              const mMatch = decrypted.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
+              if (mMatch) {
+                m3u8Url = mMatch[0];
+              }
+            }
+          }
+        }
+      }
 
+      if (!m3u8Url) return null;
       const embedDomain = new URL(embedUrl).origin;
-      return { m3u8: urlMatch[0], referer: embedDomain };
+      return { m3u8: m3u8Url, referer: embedDomain };
     } catch (e) {
       console.warn(`[${this.name}] m3u8 extraction failed for ${embedUrl}:`, e.message);
       return null;
@@ -227,7 +259,14 @@ class TimStreamsProvider extends BaseProvider {
             title: `TimStreams ${matchTitle}`,
             url: proxyUrl,
             behaviorHints: { 
-              notWebReady: true
+              notWebReady: true,
+              proxyHeaders: {
+                request: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                  'Referer': referer,
+                  'Origin': new URL(referer).origin
+                }
+              }
             },
             resolution: 'HD'
           }));
