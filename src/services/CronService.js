@@ -1,4 +1,5 @@
 const cron = require('node-cron');
+const StreamResolveCache = require('../services/StreamResolveCache');
 
 // Catalog stale-while-revalidate window: once the cache is older than this,
 // the next catalog/meta request triggers a background re-sync (see ensureFresh).
@@ -165,6 +166,7 @@ class CronService {
   async prewarmPopular() {
     try {
       const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 12);
+      if (PREWARM_MAX <= 0) return; // master switch: 0 disables every prewarm path
       const { isMatchLive, isReplayMatch } = require('../catalog');
       const { prewarmMatch, prewarmSkipProvidersSet } = require('../streams');
       const resolveCache = this.streamResolveCache;
@@ -200,9 +202,9 @@ class CronService {
         if (resolveCache) {
           const prioritySources = m.sources.filter(s => ['daddylive', 'ppvst'].includes(s.source) && !skip.has(String(s.source || '').toLowerCase()));
           if (prioritySources.length > 0) {
-            warm = prioritySources.every(s => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+            warm = prioritySources.every(s => resolveCache.isResolved(StreamResolveCache.resolveKey(s, m.id)));
           } else {
-            warm = m.sources.some((s) => !skip.has(String(s.source || '').toLowerCase()) && resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+            warm = m.sources.some((s) => !skip.has(String(s.source || '').toLowerCase()) && resolveCache.isResolved(StreamResolveCache.resolveKey(s, m.id)));
           }
         }
         if (!warm) todo.push(m);
