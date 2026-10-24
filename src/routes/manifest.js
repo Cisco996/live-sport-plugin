@@ -19,6 +19,14 @@ const { rewriteHlsUri, rewriteHlsPlaylist } = require('../services/HlsRewriteSer
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
 
+// Variant BANDWIDTH declarations seen in master playlists, keyed by the
+// absolute upstream URL of the child media playlist. When that child is served
+// through this proxy, its byte-range length estimates start from the real
+// declared bitrate instead of SegmentLengthService's default (probes deliver
+// the true per-segment length moments later; this only shapes the estimate).
+const VARIANT_BITRATE_CACHE_MAX = 1000;
+const variantBitrateCache = new Map();
+
 router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
   const isVavooTarget = Boolean(
@@ -123,6 +131,19 @@ router.get('/api/manifest', async (req, res) => {
           if (parser.manifest.targetDuration) {
             dynamicTtl = (parser.manifest.targetDuration * 1000) / 2;
           }
+          if (Array.isArray(parser.manifest.variants)) {
+            for (const v of parser.manifest.variants) {
+              const bw = v && v.attributes && v.attributes.BANDWIDTH;
+              if (!bw || !v.uri) continue;
+              try {
+                const abs = new URL(v.uri, effectiveUrl).toString();
+                variantBitrateCache.set(abs, bw);
+                if (variantBitrateCache.size > VARIANT_BITRATE_CACHE_MAX) {
+                  variantBitrateCache.delete(variantBitrateCache.keys().next().value);
+                }
+              } catch (_) {}
+            }
+          }
         } catch (e) {
           // Fallback to default TTL on parse error
         }
@@ -142,7 +163,8 @@ router.get('/api/manifest', async (req, res) => {
           referer,
           origin,
           rckSuffix,
-          absoluteAddonBaseUrl: getRequestBaseUrl(req)
+          absoluteAddonBaseUrl: getRequestBaseUrl(req),
+          bitrate: out.includes('#EXT-X-STREAM-INF') ? undefined : variantBitrateCache.get(effectiveUrl)
         });
         manifestCacheSet(cacheKey, rewrittenResult, dynamicTtl);
         return rewrittenResult;
