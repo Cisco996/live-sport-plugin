@@ -477,9 +477,9 @@ http://193.47.62.1:8080/live/game.m3u8
         const stream = resolved[0];
         expect(stream).toBeInstanceOf(StreamEntity);
         expect(stream.name).toBe('Ak47Live');
-        expect(stream.title).toContain('[TNT2UK SPORTS FHD]');
+        // Channel name in parens so the pipeline label extractor surfaces it
+        expect(stream.title).toContain('(TNT2UK SPORTS FHD)');
         expect(stream.title).toContain('Japan vs Venezuela');
-        expect(stream.title).toContain('FHD');
         expect(stream.url).toMatch(/\/api\/dash\/index\.m3u8\?d=.+$/);
         expect(stream.behaviorHints.notWebReady).toBe(false);
 

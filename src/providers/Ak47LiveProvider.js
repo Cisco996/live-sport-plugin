@@ -460,7 +460,9 @@ class Ak47LiveProvider extends BaseProvider {
 
                 return [new StreamEntity({
                   name: 'Ak47Live',
-                  title: `[${channelLabel}] ${matchTitle || 'Live Event'} (1080p FHD)`,
+                  // Channel name inside () — the stream pipeline extracts the
+                  // first parenthesised group as the displayed channel label.
+                  title: `${matchTitle || 'Live Event'} (${channelLabel})`,
                   url: `${BASE_URL}/api/dash/index.m3u8?d=${payload}`,
                   behaviorHints: { notWebReady: false },
                   resolution: 'FHD'
