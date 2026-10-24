@@ -15,7 +15,7 @@ const {
 const {
   readRck, getRemintCacheKey, remintCache, mergeRemintedUrl, isExpiryStatus, attemptRemint
 } = require('../remint');
-const { rewriteHlsUri, rewriteHlsPlaylist } = require('../services/HlsRewriteService');
+const { rewriteHlsUri, rewriteHlsPlaylist, preprobeManifestSegments } = require('../services/HlsRewriteService');
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
 
@@ -158,6 +158,10 @@ router.get('/api/manifest', async (req, res) => {
           dynamicTtl = Math.min(dynamicTtl, 3000);
         }
         let injectedStart = out.includes('#EXT-X-START');
+
+        if (!isMaster) {
+          await preprobeManifestSegments(out, effectiveUrl, { referer, origin });
+        }
 
         const rewrittenResult = rewriteHlsPlaylist(out, effectiveUrl, {
           referer,

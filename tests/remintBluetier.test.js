@@ -124,7 +124,7 @@ describe('Bluetier Remint & Token Lifecycle', () => {
     });
 
     it('caps DaddyLive learned TTL to 150 seconds even after multiple noteSuccess calls', () => {
-      const key = 'daddylive:match1:33';
+      const key = `daddylive:match_clamping_${Date.now()}:33`;
       cache.ttl.set('daddylive', 60000);
 
       cache.noteSuccess(key); // doubles to 120s
@@ -144,7 +144,7 @@ describe('Bluetier Remint & Token Lifecycle', () => {
       const token = `${b64}.signature`;
       const url = `https://ds169.bluetier.top/tntsports3/index.m3u8?token=${token}`;
 
-      const key = 'daddylive:match1:33';
+      const key = `daddylive:match_clamping_${Date.now()}:33`;
       await cache.getOrCreate(key, async () => [
         new StreamEntity({ url, title: 'TNT 3', source: 'daddylive' })
       ]);

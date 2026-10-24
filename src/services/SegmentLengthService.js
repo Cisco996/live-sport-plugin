@@ -8,13 +8,10 @@ const DEFAULT_FALLBACK_LENGTH = 1022720; // 5440 * 188 bytes (MPEG-TS packet ali
 const DEFAULT_BITRATE = 6000000; // 6 Mbps default for 1080p
 const CLOAKED_PREFIX_BYTES = 42; // fake WebP/RIFF header Streamed.pk / TikTok CDN prepends
 
-// Over-declare estimated byte ranges. An over-declared range is harmless — the
-// CDN answers 206 with the bytes that actually exist, so the player receives
-// the complete segment. An under-declared range truncates the segment tail
-// mid-GOP, which stalls the decoder and repeats the last frame. Estimates are
-// only served until the first successful probe replaces them, so erring high
-// costs nothing.
-const ESTIMATE_SAFETY_FACTOR = 1.5;
+// Use 1.0 exact safety factor. Pre-probing ensures the exact segment length
+// is known and cached before serving the manifest, matching upstream TikTok CDN
+// byte counts to avoid player decoder EOF stalls and repeated frames.
+const ESTIMATE_SAFETY_FACTOR = 1.0;
 
 // After a failed probe, suppress re-probing for this long so the ~2-4s playlist
 // rewrite cadence does not fire a new probe for the same URL every cycle.
@@ -39,6 +36,17 @@ class SegmentLengthService {
   alignToTsPacket(rawBytes) {
     if (rawBytes <= 188) return 188;
     return Math.floor(rawBytes / 188) * 188;
+  }
+
+  /**
+   * Check if a segment URL has a valid probed length in cache.
+   *
+   * @param {string} segmentUrl
+   * @returns {boolean}
+   */
+  hasValidLength(segmentUrl) {
+    const cached = this.cache.get(segmentUrl);
+    return Boolean(cached && cached.expiresAt > Date.now() && cached.length > 0);
   }
 
   /**

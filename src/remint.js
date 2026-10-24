@@ -188,9 +188,25 @@ async function attemptRemint(rck, heldUrl = '') {
     for (const c of candidates) {
       const match = matches.find(m => m && m.id === c.matchId);
       if (!match) continue;
-      const src = (match.sources || []).find(s => s && s.id === c.srcId);
+      const src = (match.sources || []).find(s => {
+        if (!s) return false;
+        const sId = String(s.id);
+        const cId = String(c.srcId);
+        if (sId === cId) return true;
+        if (cId.startsWith(sId + ':')) return true;
+        if (s.streamId && String(s.streamId) === cId) return true;
+        return false;
+      });
       if (!src) continue;
-      resolved = { match, src };
+      let remintSrcCandidate = { ...src };
+      const sId = String(src.id);
+      const cId = String(c.srcId);
+      if (cId.startsWith(sId + ':')) {
+        const subParts = cId.slice(sId.length + 1).split(':');
+        if (subParts[0]) remintSrcCandidate.streamSource = subParts[0];
+        if (subParts[1]) remintSrcCandidate.streamId = subParts[1];
+      }
+      resolved = { match, src: remintSrcCandidate };
       break;
     }
     if (!resolved) return null;

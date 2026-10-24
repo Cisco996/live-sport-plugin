@@ -128,7 +128,13 @@ class PpvStProvider extends BaseProvider {
       const m = stdout.match(/"file":\s*"(https?:\/\/[^"]+\.m3u8.*?)"/);
       if (m) {
         const m3u8Url = m[1];
-        const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+        const streamReferer = (m3u8Url.includes('indianservers.st') || m3u8Url.includes('embedindia.st') || embedUrl.includes('taifood'))
+          ? 'https://embedindia.st/'
+          : referer;
+        const streamOrigin = (streamReferer === 'https://embedindia.st/')
+          ? 'https://embedindia.st'
+          : origin;
+        const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(streamReferer)}&origin=${encodeURIComponent(streamOrigin)}`;
         
           const langStr = src.language ? ` [${src.language.toUpperCase()}]` : '';
           const isTikTokStream = Boolean(/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(m3u8Url) || /admin|strmd\.st|\.image|tiktokcdn/i.test(embedUrl));
@@ -140,8 +146,8 @@ class PpvStProvider extends BaseProvider {
               notWebReady: true,
               proxyHeaders: {
                 request: {
-                  'Referer': referer,
-                  'Origin': origin,
+                  'Referer': streamReferer,
+                  'Origin': streamOrigin,
                   'User-Agent': UA
                 }
               }

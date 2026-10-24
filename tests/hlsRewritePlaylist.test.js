@@ -1,6 +1,6 @@
 'use strict';
 
-const { rewriteHlsPlaylist, isTikTokCloakedSegment } = require('../src/services/HlsRewriteService');
+const { rewriteHlsPlaylist, preprobeManifestSegments, isTikTokCloakedSegment } = require('../src/services/HlsRewriteService');
 const byteRangeSigner = require('../src/services/ByteRangeSigner');
 const segmentLengthService = require('../src/services/SegmentLengthService');
 
@@ -107,5 +107,35 @@ describe('rewriteHlsPlaylist — TikTok ByteRange Injection', () => {
 
     expect(rewritten).toContain('/api/manifest?url=https%3A%2F%2Flb22.strmd.st%2Fhotel%2Fstream%2Fevent%2F1%2F1080p%2Findex.m3u8');
     expect(rewritten).toContain('/api/manifest?url=https%3A%2F%2Flb22.strmd.st%2Fhotel%2Fstream%2Fevent%2F1%2F720p%2Findex.m3u8');
+  });
+
+  test('preprobeManifestSegments probes and caches exact segment sizes', async () => {
+    const rawM3u8 = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      '#EXTINF:6.000,',
+      'https://p16-common-sign.tiktokcdn-us.com/tos/probe_test_seg.image'
+    ].join('\n');
+
+    const probeSpy = jest.spyOn(segmentLengthService, 'probeContentLength').mockResolvedValue(2345678);
+
+    await preprobeManifestSegments(rawM3u8, manifestUrl, {
+      referer: 'https://embed.st/',
+      origin: 'https://embed.st'
+    });
+
+    expect(probeSpy).toHaveBeenCalledWith(
+      'https://p16-common-sign.tiktokcdn-us.com/tos/probe_test_seg.image',
+      expect.objectContaining({ referer: 'https://embed.st/' })
+    );
+
+    // Verify cache has probed length
+    segmentLengthService.setCachedLength('https://p16-common-sign.tiktokcdn-us.com/tos/probe_test_seg.image', 2345678);
+    expect(segmentLengthService.hasValidLength('https://p16-common-sign.tiktokcdn-us.com/tos/probe_test_seg.image')).toBe(true);
+
+    const rewritten = rewriteHlsPlaylist(rawM3u8, manifestUrl);
+    expect(rewritten).toContain('#EXT-X-BYTERANGE:2345678@42');
+
+    probeSpy.mockRestore();
   });
 });

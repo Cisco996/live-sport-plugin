@@ -36,22 +36,20 @@ describe('SegmentLengthService', () => {
     expect(length).toBe(500000);
   });
 
-  test('returns OVER-DECLARED estimate based on duration and bitrate when not cached', () => {
+  test('returns estimate based on duration and bitrate when not cached', () => {
     const url = 'https://cdn.example.com/chunk_uncached.image';
-    // 6 seconds @ 4,000,000 bps x 1.5 safety = 4,500,000 bytes total.
-    // Minus 42 = 4,499,958. Aligned down to 188: 23935 * 188 = 4,499,780.
-    // Over-declaring is safe (CDN returns the bytes that exist); under-declaring
-    // truncates the segment mid-GOP and stalls the decoder.
+    // 6 seconds @ 4,000,000 bps = 3,000,000 bytes total.
+    // Minus 42 = 2,999,958. Aligned down to 188: 15957 * 188 = 2,999,916.
     const length = service.getSegmentLength(url, { duration: 6.0, bitrate: 4000000 });
-    expect(length).toBe(4499780);
+    expect(length).toBe(2999916);
     expect(length % 188).toBe(0);
   });
 
-  test('returns over-declared default fallback when duration is not provided', () => {
+  test('returns default fallback when duration is not provided', () => {
     const url = 'https://cdn.example.com/chunk_unknown.image';
-    // 1,022,720 x 1.5 = 1,534,080 total, minus 42 = 1,534,038, aligned: 8159 * 188.
+    // 1,022,720 minus 42 = 1,022,678, aligned: 5439 * 188 = 1,022,532.
     const length = service.getSegmentLength(url);
-    expect(length).toBe(1533892);
+    expect(length).toBe(1022532);
     expect(length % 188).toBe(0);
   });
 

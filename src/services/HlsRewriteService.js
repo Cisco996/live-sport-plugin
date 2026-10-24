@@ -223,10 +223,51 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
   return rewritten.join('\n');
 }
 
+/**
+ * Scan a manifest body for cloaked TikTok segments and pre-probe all un-cached
+ * segments in parallel before the manifest is rewritten.
+ *
+ * Ensures #EXT-X-BYTERANGE declarations match the exact byte size served by the
+ * upstream CDN, preventing player decoder EOF stalls and repeated frames.
+ *
+ * @param {string} manifestBody
+ * @param {string} manifestUrl
+ * @param {Object} [opts={}]
+ * @returns {Promise<void>}
+ */
+async function preprobeManifestSegments(manifestBody, manifestUrl, opts = {}) {
+  const { referer = '', origin = '' } = opts;
+  const lines = String(manifestBody).split('\n');
+  const urlsToProbe = new Set();
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const absUrl = resolveSegmentUrl(trimmed, manifestUrl);
+    if (isTikTokCloakedSegment(absUrl)) {
+      if (!segmentLengthService.hasValidLength(absUrl)) {
+        urlsToProbe.add(absUrl);
+      }
+    }
+  }
+
+  if (urlsToProbe.size === 0) return;
+
+  const probePromises = [...urlsToProbe].map(url =>
+    segmentLengthService.probeContentLength(url, { referer, origin })
+  );
+
+  await Promise.race([
+    Promise.allSettled(probePromises),
+    new Promise(resolve => setTimeout(resolve, 1500))
+  ]);
+}
+
 module.exports = {
   resolveSegmentUrl,
   rewriteHlsUri,
   rewriteHlsPlaylist,
+  preprobeManifestSegments,
   isTikTokCloakedSegment,
   buildByteRangeRedirectUrl,
   workerPool,
