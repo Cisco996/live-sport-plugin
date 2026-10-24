@@ -22,6 +22,7 @@ const DamiTvProvider = require('./providers/DamiTvProvider');
 const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
+const StreamedWasmPool = require('./services/StreamedWasmPool');
 const IframeDomainRegistry = require('./services/IframeDomainRegistry');
 const PpvStProvider = require('./providers/PpvStProvider');
 const SoccerFullProvider = require('./providers/SoccerFullProvider');
@@ -43,13 +44,14 @@ const container = createContainer({
 // Register Core Services
 container.register({
   replayzoneProvider: asClass(ReplayZoneProvider).singleton(),
-    cacheService: asClass(CacheService).singleton(),
+  cacheService: asClass(CacheService).singleton(),
   circuitBreaker: asClass(CircuitBreakerService).singleton(),
   m3u8Parser: asClass(M3U8ParserService).singleton(),
   cronService: asClass(CronService).singleton(),
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),
   streamResolveCache: asValue(new StreamResolveCache()),
+  streamedWasmPool: asValue(StreamedWasmPool),
   providerHealthService: asClass(ProviderHealthService).singleton(),
   teamLogoService: asClass(TeamLogoService).singleton(),
   broadcasterMatchService: asValue(new BroadcasterMatchService()),
