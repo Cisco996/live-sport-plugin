@@ -60,6 +60,65 @@ const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballv
 const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf'];
 const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf'];
 
+// Labeling tables hoisted to module scope: they were allocated per request
+// (handleStream) and per formatChannelStreamTitle call.
+const STREAM_SPORT_ICONS = {
+  football: '⚽', cricket: '🏏', motorsport: '🏎️',
+  basketball: '🏀', american_football: '🏈', rugby: '🏉', networks: '📺'
+};
+
+const NICE_NAMES = {
+  vavoo: 'Vavoo',
+  cdnlive: 'CDNLiveTV',
+  watchfooty: 'WatchFooty',
+  daddylive: 'DaddyLive',
+  timstreams: 'TimStreams',
+  streamsports: 'StreamSports',
+  streamsports99: 'StreamSports99',
+  'embedindia': 'Streamed.pk', 'embedst': 'Streamed.pk', 'streamedpk': 'Streamed.pk',
+  'replayzone': 'ReplayZone',
+  'livetv': 'LiveTV',
+  'damitv': 'DamiTV',
+  'ppvst': 'PPV.st',
+  'soccerfull': 'SoccerFull',
+  'sktech': 'SKTech',
+  'basketballvideo': 'BasketballVideo',
+  'nflvideo': 'NFLVideo',
+  'fullraces': 'FullRaces',
+  'hockeyreplays': 'HockeyReplays',
+  'mlblive': 'MLBLive',
+  admin: 'Streamed.pk',
+  echo: 'Streamed.pk',
+  golf: 'Streamed.pk',
+  delta: 'Streamed.pk'
+};
+
+const CHANNEL_TITLE_NICE_NAMES = {
+  daddylive: 'DaddyLive',
+  watchfooty: 'WatchFooty',
+  cdnlive: 'CDNLiveTV',
+  streamsports99: 'StreamSports99',
+  timstreams: 'TimStreams',
+  streamsports: 'StreamSports',
+  embedindia: 'Streamed.pk',
+  embedst: 'Streamed.pk',
+  streamedpk: 'Streamed.pk',
+  replayzone: 'ReplayZone',
+  livetv: 'LiveTV',
+  damitv: 'DamiTV',
+  soccerfull: 'SoccerFull',
+  basketballvideo: 'BasketballVideo',
+  nflvideo: 'NFLVideo',
+  fullraces: 'FullRaces',
+  hockeyreplays: 'HockeyReplays',
+  mlblive: 'MLBLive',
+  sktech: 'SKTech',
+  vavoo: 'Vavoo',
+  ppvst: 'PPV.st',
+  ak47live: 'AK47Live',
+  leaf: 'Leaf'
+};
+
 function isReplaySource(sourceName) {
   return KNOWN_REPLAY_SOURCES.includes(sourceName);
 }
@@ -1235,37 +1294,7 @@ async function handleStream(type, id, config) {
   // --- Inject relevant 24/7 channels based on category ---
 
   // Standardize Stream Labels
-  const sportIcons = {
-    football: '⚽', cricket: '🏏', motorsport: '🏎️',
-    basketball: '🏀', american_football: '🏈', rugby: '🏉', networks: '📺'
-  };
-  const icon = sportIcons[match.category] || '📡';
-  
-  const niceNames = {
-    vavoo: 'Vavoo',
-    cdnlive: 'CDNLiveTV',
-    watchfooty: 'WatchFooty',
-    daddylive: 'DaddyLive',
-    timstreams: 'TimStreams',
-    streamsports: 'StreamSports',
-    streamsports99: 'StreamSports99',
-    'embedindia': 'Streamed.pk', 'embedst': 'Streamed.pk', 'streamedpk': 'Streamed.pk',
-    'replayzone': 'ReplayZone',
-    'livetv': 'LiveTV',
-    'damitv': 'DamiTV',
-    'ppvst': 'PPV.st',
-    'soccerfull': 'SoccerFull',
-    'sktech': 'SKTech',
-    'basketballvideo': 'BasketballVideo',
-    'nflvideo': 'NFLVideo',
-    'fullraces': 'FullRaces',
-    'hockeyreplays': 'HockeyReplays',
-    'mlblive': 'MLBLive',
-    admin: 'Streamed.pk',
-    echo: 'Streamed.pk',
-    golf: 'Streamed.pk',
-    delta: 'Streamed.pk'
-  };
+  const icon = STREAM_SPORT_ICONS[match.category] || '📡';
 
   // ─── Eliminate DASH (.mpd) & ClearKey DRM streams completely ──────────
   // ExoPlayer on stock Android apps lacks MediaDrm callbacks, causing black
@@ -1330,24 +1359,27 @@ async function handleStream(type, id, config) {
     }
 
     const isWeb = !isYouTube && (!!s.externalUrl || s.name === 'Nuvio Web Player');
-    let providerName = niceNames[s._source] ||
+    // Fold the title once: the provider-name chain below used to re-lowercase
+    // the same title up to ~16 times per stream.
+    const sTitleLower = (typeof s.title === 'string' && s.title) ? s.title.toLowerCase() : '';
+    let providerName = NICE_NAMES[s._source] ||
       (s._source ? (s._source.charAt(0).toUpperCase() + s._source.slice(1)) : null) ||
-      niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] ||
+      NICE_NAMES[Object.keys(NICE_NAMES).find(k => sTitleLower.includes(k))] ||
       'Streamed.pk';
-    
-    if (s._source === 'vavoo' || (s.title && s.title.toLowerCase().includes('vavoo'))) providerName = 'Vavoo';
-    else if (s._source === 'cdnlive' || (s.title && s.title.toLowerCase().includes('cdnlive'))) providerName = 'CDNLiveTV';
-    else if (s._source === 'watchfooty' || (s.title && s.title.toLowerCase().includes('watchfooty'))) providerName = 'WatchFooty';
-    else if (s._source === 'daddylive' || (s.title && s.title.toLowerCase().includes('daddylive'))) providerName = 'DaddyLive';
-    else if (s._source === 'timstreams' || (s.title && s.title.toLowerCase().includes('timstreams'))) providerName = 'TimStreams';
-    else if (s._source === 'streamsports99' || (s.title && s.title.toLowerCase().includes('streamsports99'))) providerName = 'StreamSports99';
-    else if (s._source === 'sktech' || (s.title && s.title.toLowerCase().includes('sk tech')) || (s.title && s.title.toLowerCase().includes('sktech'))) providerName = 'SKTech';
-    else if (s._source === 'hockeyreplays' || (s.title && s.title.toLowerCase().includes('hockeyreplays'))) providerName = 'HockeyReplays';
-    else if (s._source === 'mlblive' || (s.title && s.title.toLowerCase().includes('mlblive'))) providerName = 'MLBLive';
-    else if (s._source === 'damitv' || (s.title && s.title.toLowerCase().includes('damitv'))) providerName = 'DamiTV';
-    else if (s._source === 'ppvst' || (s.title && s.title.toLowerCase().includes('ppvst'))) providerName = 'PPV.st';
-    else if (s._source === 'livetv' || (s.title && s.title.toLowerCase().includes('livetv'))) providerName = 'LiveTV';
-    else if (s._source === 'replayzone' || (s.title && s.title.toLowerCase().includes('replayzone'))) providerName = 'ReplayZone';
+
+    if (s._source === 'vavoo' || sTitleLower.includes('vavoo')) providerName = 'Vavoo';
+    else if (s._source === 'cdnlive' || sTitleLower.includes('cdnlive')) providerName = 'CDNLiveTV';
+    else if (s._source === 'watchfooty' || sTitleLower.includes('watchfooty')) providerName = 'WatchFooty';
+    else if (s._source === 'daddylive' || sTitleLower.includes('daddylive')) providerName = 'DaddyLive';
+    else if (s._source === 'timstreams' || sTitleLower.includes('timstreams')) providerName = 'TimStreams';
+    else if (s._source === 'streamsports99' || sTitleLower.includes('streamsports99')) providerName = 'StreamSports99';
+    else if (s._source === 'sktech' || sTitleLower.includes('sk tech') || sTitleLower.includes('sktech')) providerName = 'SKTech';
+    else if (s._source === 'hockeyreplays' || sTitleLower.includes('hockeyreplays')) providerName = 'HockeyReplays';
+    else if (s._source === 'mlblive' || sTitleLower.includes('mlblive')) providerName = 'MLBLive';
+    else if (s._source === 'damitv' || sTitleLower.includes('damitv')) providerName = 'DamiTV';
+    else if (s._source === 'ppvst' || sTitleLower.includes('ppvst')) providerName = 'PPV.st';
+    else if (s._source === 'livetv' || sTitleLower.includes('livetv')) providerName = 'LiveTV';
+    else if (s._source === 'replayzone' || sTitleLower.includes('replayzone')) providerName = 'ReplayZone';
 
     let originalTitle = s.title || '';
     let channelName = '';
@@ -1597,31 +1629,7 @@ function isLikelyPerTeamChannel(stream) {
  * Provider | Channel — Country [Flag] — Language — Quality [Backup] [+1 Delay]
  */
 function formatChannelStreamTitle(s, match, providerNameOverride, countryInfo, qualityOverride, channelNameOverride, originalTitleOverride) {
-  const niceNames = {
-    daddylive: 'DaddyLive',
-    watchfooty: 'WatchFooty',
-    cdnlive: 'CDNLiveTV',
-    streamsports99: 'StreamSports99',
-    timstreams: 'TimStreams',
-    streamsports: 'StreamSports',
-    embedindia: 'Streamed.pk',
-    embedst: 'Streamed.pk',
-    streamedpk: 'Streamed.pk',
-    replayzone: 'ReplayZone',
-    livetv: 'LiveTV',
-    damitv: 'DamiTV',
-    soccerfull: 'SoccerFull',
-    basketballvideo: 'BasketballVideo',
-    nflvideo: 'NFLVideo',
-    fullraces: 'FullRaces',
-    hockeyreplays: 'HockeyReplays',
-    mlblive: 'MLBLive',
-    sktech: 'SKTech',
-    vavoo: 'Vavoo',
-    ppvst: 'PPV.st',
-    ak47live: 'AK47Live',
-    leaf: 'Leaf'
-  };
+  const niceNames = CHANNEL_TITLE_NICE_NAMES;
 
   const srcKey = s._source || s.sourceName || (s.name && s.name.toLowerCase());
   let providerName = providerNameOverride || niceNames[srcKey] ||

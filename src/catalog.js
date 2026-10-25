@@ -79,6 +79,36 @@ const REPLAY_SPORTS = [
 // Sources whose matches qualify for the replay retention window and replay hubs.
 const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
 
+// Static tables hoisted to module scope: mapMatchToMetaPreview runs per meta
+// per page, and allocating these per call churned ~7 RegExp objects + a 15-key
+// object on every invocation.
+const CATEGORY_COLORS = {
+  football: '10b981', // green
+  basketball: 'f97316', // orange
+  motorsport: 'ef4444', // red
+  cricket: '0ea5e9', // light blue
+  tennis: 'a3e635', // lime
+  rugby: '8b5cf6', // purple
+  american_football: '0369a1', // dark blue
+  baseball: 'f43f5e', // rose
+  hockey: '06b6d4', // cyan
+  golf: '22c55e', // emerald
+  darts: 'eab308', // yellow
+  mma: 'dc2626', // crimson red
+  networks: '64748b', // slate
+  college: 'd946ef' // fuchsia
+};
+
+const CHANNEL_THUMBNAIL_MAP = [
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_willow/i, channel: 'willow' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_sky.?cricket/i, channel: 'sky sports cricket' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_fox.?cricket/i, channel: 'fox cricket' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_astro.?cricket/i, channel: 'astro cricket' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_supersport.?cricket/i, channel: 'supersport cricket' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_star.?sports/i, channel: 'star sports' },
+  { rx: /\/thumbnails\/cricket_[a-f0-9-]+_sony.?sports/i, channel: 'sony sports' },
+];
+
 const GENRE_TO_CATEGORY = {
   'football': 'football',
   'soccer': 'football',
@@ -419,23 +449,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const safeTitle = encodeURIComponent(Array.from(titleStr).slice(0, 30).join(''));
   
   // Dynamic Sport-Specific Posters
-  const categoryColors = {
-    football: '10b981', // green
-    basketball: 'f97316', // orange
-    motorsport: 'ef4444', // red
-    cricket: '0ea5e9', // light blue
-    tennis: 'a3e635', // lime
-    rugby: '8b5cf6', // purple
-    american_football: '0369a1', // dark blue
-    baseball: 'f43f5e', // rose
-    hockey: '06b6d4', // cyan
-    golf: '22c55e', // emerald
-    darts: 'eab308', // yellow
-    mma: 'dc2626', // crimson red
-    networks: '64748b', // slate
-    college: 'd946ef' // fuchsia
-  };
-  const color = categoryColors[match.category] || '333333';
+  const color = CATEGORY_COLORS[match.category] || '333333';
 
   // Competitor names, filled from the title when the provider omitted them.
   const cleanTeamName = (name) => {
@@ -514,15 +528,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // ─── Upgrade low-quality provider thumbnails to hi-res channel logos ───
   // Providers often emit generic /thumbnails/..._Willow tiles. If we have a
   // high-res logo from ChannelLogoService for the same channel, prefer it.
-  const CHANNEL_THUMBNAIL_MAP = [
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_willow/i, channel: 'willow' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_sky.?cricket/i, channel: 'sky sports cricket' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_fox.?cricket/i, channel: 'fox cricket' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_astro.?cricket/i, channel: 'astro cricket' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_supersport.?cricket/i, channel: 'supersport cricket' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_star.?sports/i, channel: 'star sports' },
-    { rx: /\/thumbnails\/cricket_[a-f0-9-]+_sony.?sports/i, channel: 'sony sports' },
-  ];
+  // (CHANNEL_THUMBNAIL_MAP is a module-level constant.)
   const matchedChannelThumb = providerThumb ? CHANNEL_THUMBNAIL_MAP.find(m => m.rx.test(providerThumb)) : null;
   let isChannelThumbnail = !!matchedChannelThumb;
   const isMatchup = !!(team1Name && team2Name);

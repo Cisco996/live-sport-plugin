@@ -76,8 +76,12 @@ function _foldText(s) {
  * before the bare-"inter" rule, otherwise "Inter Miami" would compound to
  * "intermilan" and collide with Inter Milan.
  */
-function _compoundify(t) {
-  const aliases = [
+// Hoisted to module scope: _compoundify runs up to ~6x per _precompute row
+// (title, extracted teams, fallback teams), and rebuilding this table per call
+// allocated ~180 objects (90 RegExp + 90 pair arrays) each time — millions of
+// short-lived allocations per sync. String.replace with a /g regex always
+// starts at index 0, so shared instances carry no cross-call state.
+const COMPOUND_ALIASES = [
     // Motorsport — Formula 1 / F1 must come FIRST so the "1" never becomes a
     // stray digit that blocks e.g. "Formula 1 Azerbaijan GP" from merging with
     // "Azerbaijan Grand Prix". "GP" also normalised to "grandprix" to help
@@ -188,9 +192,11 @@ function _compoundify(t) {
     [/\bthe\s*cong\b/g, 'thecong'],
     [/\bnam\s*dinh\b/g, 'namdinh'],
     [/\bbinh\s*duong\b|\bbihn\s*duong\b/g, 'binhduong'],
-  ];
+];
+
+function _compoundify(t) {
   let r = _foldText(t).toLowerCase();
-  for (const [regex, rep] of aliases) r = r.replace(regex, rep);
+  for (const [regex, rep] of COMPOUND_ALIASES) r = r.replace(regex, rep);
   return r;
 }
 

@@ -574,6 +574,27 @@ class TeamLogoService {
     this._logoDirty = false;
     this._logoNotifyTimer = null;
     this._loadDiskCache();
+    // Expired entries (especially negatives that are never looked up again)
+    // used to be retained forever — the only eviction was lazy, on re-lookup.
+    // A short unref'd sweep keeps the map tight without touching the hot path.
+    this._sweepTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [k, entry] of this.cache) {
+        if (entry && entry.expiresAt <= now) this.cache.delete(k);
+      }
+    }, 5 * 60 * 1000);
+    if (this._sweepTimer.unref) this._sweepTimer.unref();
+  }
+
+  // Insertion-order LRU: hits are promoted in getCachedLogo, so evicting from
+  // the front drops the coldest entries (never-revisited negatives, teams that
+  // dropped off the schedule) instead of growing without bound.
+  _evictOverCap() {
+    if (this.cache.size <= MAX_CACHE_SIZE) return;
+    for (const k of this.cache.keys()) {
+      if (this.cache.size <= MAX_CACHE_SIZE) break;
+      this.cache.delete(k);
+    }
   }
 
   // Fire onChange at most every 20s (leading edge + one trailing fire), so a
@@ -628,7 +649,9 @@ class TeamLogoService {
       const dir = path.dirname(CACHE_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const tempPath = `${CACHE_FILE}.tmp.${process.pid}`;
-      fs.writeFileSync(tempPath, JSON.stringify(obj, null, 2), 'utf-8');
+      // Compact JSON: pretty-printing roughly doubled the file size and the
+      // write is synchronous on the event loop.
+      fs.writeFileSync(tempPath, JSON.stringify(obj), 'utf-8');
       fs.renameSync(tempPath, CACHE_FILE);
     } catch (_) {}
   }
@@ -695,7 +718,14 @@ class TeamLogoService {
     // 3. Memory cache
     const cached = this.cache.get(key) || (cleanKey !== key ? this.cache.get(cleanKey) : null);
     if (cached) {
-      if (cached.expiresAt > Date.now()) return cached.url || null;
+      if (cached.expiresAt > Date.now()) {
+        // LRU-promote whichever key hit so insertion-order eviction drops
+        // cold entries first.
+        const hitKey = this.cache.get(key) ? key : cleanKey;
+        this.cache.delete(hitKey);
+        this.cache.set(hitKey, cached);
+        return cached.url || null;
+      }
       this.cache.delete(key);
       if (cleanKey !== key) this.cache.delete(cleanKey);
     }
@@ -840,6 +870,7 @@ class TeamLogoService {
               const badgeUrl = bestTeam.strBadge;
               const prev = this.cache.get(key);
               this.cache.set(key, { url: badgeUrl, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+              this._evictOverCap();
               if (this.cache.size % 20 === 0) this._saveDiskCache();
               // A crest that wasn't there before changes how match cards render —
               // tell generation-keyed caches to rebuild.
@@ -851,6 +882,7 @@ class TeamLogoService {
           // Only negative cache if we successfully received a 200 OK from TheSportsDB indicating no teams found
           if (data) {
             this.cache.set(key, { url: null, expiresAt: Date.now() + NEGATIVE_TTL_MS });
+            this._evictOverCap();
           }
           return null;
         }
