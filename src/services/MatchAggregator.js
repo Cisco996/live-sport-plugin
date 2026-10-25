@@ -38,7 +38,7 @@ function _parseEventDate(raw) {
   const n = Number(raw);
   if (!Number.isNaN(n) && Number.isFinite(n) && n > 0) return n;
   const str = String(raw).trim();
-  if (!str) return 0;
+  if (!str || /^0+$/.test(str)) return 0;
   const parsed = parseTimezone(str, 'UTC');
   if (parsed && !Number.isNaN(parsed) && parsed > 0) return parsed;
   // Last resort for non-ISO shapes (e.g. "September 14, 2026").
@@ -848,6 +848,23 @@ class MatchAggregator {
     const idIndex = new Map(); // exact ID/alias -> index in finalMatches
     const categoryBuckets = new Map(); // normalized sport category -> array of finalMatches indices
 
+    // Index previous sync kickoff dates to resolve dateless scrapes (e.g. highfly/leaf, ak47 playlists)
+    const prevDateMap = new Map();
+    try {
+      const prevMatches = (this.cacheService && typeof this.cacheService.getMatches === 'function')
+        ? (this.cacheService.getMatches() || [])
+        : [];
+      for (const pm of prevMatches) {
+        if (!pm || !pm.date || pm.date === '0') continue;
+        const pmDateMs = _parseEventDate(pm.date);
+        if (!pmDateMs) continue;
+        if (pm.id) prevDateMap.set(pm.id, String(pmDateMs));
+        if (Array.isArray(pm.aliasIds)) {
+          for (const aid of pm.aliasIds) if (aid) prevDateMap.set(aid, String(pmDateMs));
+        }
+      }
+    } catch (_) {}
+
     // ─── HIGH PERFORMANCE DSA INDICES ──────────────────────────────────────────
     // 1. O(1) Channel Index: 24/7 channels match strictly on normalized title
     //    signature (p.norm). Indexing them eliminates ~8,000,000 unnecessary
@@ -876,6 +893,27 @@ class MatchAggregator {
           const match = providerMatches[r];
           if (!match.id || !match.title) continue;
           if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) continue;
+
+          // Reconcile missing kickoff dates from previous sync cache or embedded ID timestamps
+          if (!match.date || match.date === '0' || match.date === 0) {
+            if (prevDateMap.has(match.id)) {
+              match.date = prevDateMap.get(match.id);
+            } else if (Array.isArray(match.aliasIds)) {
+              for (const aid of match.aliasIds) {
+                if (prevDateMap.has(aid)) {
+                  match.date = prevDateMap.get(aid);
+                  break;
+                }
+              }
+            } else {
+              const tsMatch = String(match.id).match(/[-_](1\d{9}|1\d{12})$/);
+              if (tsMatch) {
+                const tsVal = Number(tsMatch[1]);
+                const epochMs = tsMatch[1].length === 10 ? tsVal * 1000 : tsVal;
+                if (epochMs > 0 && Number.isFinite(epochMs)) match.date = String(epochMs);
+              }
+            }
+          }
 
         const pre = this._precompute(match);
         let idx = -1;
@@ -1353,10 +1391,11 @@ class MatchAggregator {
           // the sentinel explicitly, exactly as catalog.getKickoff does, and only
           // then consult the parser.
           const rawDate = m.date;
-          const isEvergreen = rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim());
+          const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_')));
+          const isEvergreen = isChannelOrNetwork && (rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim()));
           if (isEvergreen) return true;
           const kickoff = _parseEventDate(rawDate);
-          if (!kickoff) return true;
+          if (!kickoff) return false; // Non-channel fixtures without a kickoff date cannot be evergreen
           return nowForCarry <= kickoff + retentionMs;
         }).sort((a, b) => {
           // Classify each entry into a priority bucket so that when the cap
@@ -1365,10 +1404,11 @@ class MatchAggregator {
           // insertion order and live fixtures at positions 500+ are lost first.
           const _priority = (m) => {
             const rawDate = m.date;
-            const isEvergreen = rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim());
+            const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_')));
+            const isEvergreen = isChannelOrNetwork && (rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim()));
             if (isEvergreen) return { bucket: 2, kickoff: 0 };
             const kickoff = _parseEventDate(rawDate);
-            if (!kickoff) return { bucket: 2, kickoff: 0 };
+            if (!kickoff) return { bucket: 3, kickoff: 0 };
             const LIVE_WINDOW_MS = 14 * 3600 * 1000;
             if (kickoff <= nowForCarry && nowForCarry <= kickoff + LIVE_WINDOW_MS) return { bucket: 0, kickoff };
             if (kickoff > nowForCarry) return { bucket: 1, kickoff };

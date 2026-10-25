@@ -119,6 +119,7 @@ class SkTechMatchResolver {
 
       const category = this.normalizeCategory(item.category);
       const kickoff = this.parseKickoff(item.date, item.time);
+      const endDate = this.parseKickoff(item.end_date, item.end_time);
       const linkPath = item.links || '';
 
       if (!linkPath) continue;
@@ -129,11 +130,18 @@ class SkTechMatchResolver {
                            (title === 'Live Sports Event' && !linkPath);
       if (isTestOrDemo) continue;
 
+      const now = Date.now();
+      const isFinished = endDate > 0
+        ? (now > endDate + 30 * 60 * 1000)
+        : (kickoff > 0 ? (now > kickoff + 4 * 60 * 60 * 1000) : false);
+      if (isFinished) continue;
+
       matches.push({
         id: `sktech_match_${i}_${Buffer.from(linkPath).toString('base64url').slice(0, 16)}`,
         title,
         category,
         kickoff,
+        endDate,
         rawCategory: item.category,
         linkPath,
         linkNames: item.link_names || [],

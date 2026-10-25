@@ -50,8 +50,12 @@ class SkTechProvider extends BaseProvider {
       const liveMatches = await this.matchResolver.fetchLiveMatches();
       for (const m of liveMatches) {
         if (/namibia\s*(?:vs?\.?|@|-)\s*uganda/i.test(m.title)) continue;
-        const isLive = m.kickoff && m.kickoff <= Date.now() && m.kickoff >= (Date.now() - 4 * 3600 * 1000);
-        const status = isLive ? 'live' : ((m.kickoff && m.kickoff > Date.now()) ? 'upcoming' : 'live');
+        const now = Date.now();
+        if (m.endDate && now > m.endDate + 30 * 60 * 1000) continue;
+        if (m.kickoff && m.kickoff > 0 && (now - m.kickoff) > 4 * 3600 * 1000) continue;
+
+        const isLive = m.kickoff && m.kickoff <= now && (now - m.kickoff) <= 4 * 3600 * 1000;
+        const status = isLive ? 'live' : ((m.kickoff && m.kickoff > now) ? 'upcoming' : 'live');
 
         matches.push(new MatchEntity({
           id: `sktech_${m.id}`,

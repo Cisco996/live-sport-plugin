@@ -219,6 +219,9 @@ class Ak47LiveProvider extends BaseProvider {
     }
 
     const matchesMap = new Map();
+    const finishedSlugs = new Set();
+    const finishedTeamPairs = new Set();
+    const knownEventMap = new Map();
 
     // 1. Ingest Decrypted Events Feed from hellobabu.xyz/events.txt
     try {
@@ -256,25 +259,42 @@ class Ak47LiveProvider extends BaseProvider {
               }
             }
 
-            // Omit events that finished more than 30 mins ago
-            const isFinished = endDateMs > 0
-              ? (now > endDateMs + 30 * 60 * 1000)
-              : (matchDateMs > 0 ? (now > matchDateMs + 4 * 60 * 60 * 1000) : false);
-            if (isFinished) continue;
-
-            const status = matchDateMs > 0 ? (now < matchDateMs ? 'UPCOMING' : 'LIVE') : 'LIVE';
-            const matchDate = matchDateMs > 0 ? String(matchDateMs) : '0';
-
             const t1Raw = ev.teamAName.trim();
             const t2Raw = ev.teamBName.trim();
             const isMatchup = Boolean(t1Raw && t2Raw && t1Raw.toLowerCase() !== t2Raw.toLowerCase());
             const title = isMatchup ? `${t1Raw} vs ${t2Raw}` : (ev.eventName ? ev.eventName.trim() : t1Raw);
+            const matchSlug = this.normalizeStr(title) || 'match';
+            const matchId = `ak47_${matchSlug.replace(/\s+/g, '_')}`;
+
+            // Omit events that finished more than 30 mins ago
+            const isFinished = endDateMs > 0
+              ? (now > endDateMs + 30 * 60 * 1000)
+              : (matchDateMs > 0 ? (now > matchDateMs + 4 * 60 * 60 * 1000) : false);
+            if (isFinished) {
+              finishedSlugs.add(matchSlug);
+              if (t1Raw && t2Raw) {
+                const normT1 = this.normalizeStr(t1Raw);
+                const normT2 = this.normalizeStr(t2Raw);
+                finishedTeamPairs.add(`${normT1}|${normT2}`);
+                finishedTeamPairs.add(`${normT2}|${normT1}`);
+              }
+              continue;
+            }
+
+            const status = matchDateMs > 0 ? (now < matchDateMs ? 'UPCOMING' : 'LIVE') : 'LIVE';
+            const matchDate = matchDateMs > 0 ? String(matchDateMs) : '0';
+            knownEventMap.set(matchSlug, { matchDate, status });
+            if (t1Raw && t2Raw) {
+              const normT1 = this.normalizeStr(t1Raw);
+              const normT2 = this.normalizeStr(t2Raw);
+              knownEventMap.set(`${normT1}|${normT2}`, { matchDate, status });
+              knownEventMap.set(`${normT2}|${normT1}`, { matchDate, status });
+            }
+
             const team1 = isMatchup ? { name: t1Raw } : null;
             const team2 = isMatchup ? { name: t2Raw } : null;
             const category = this.normalizeCategory(ev.category || 'Football');
             const league = ev.eventName ? ev.eventName.trim() : '';
-            const matchSlug = this.normalizeStr(title) || 'match';
-            const matchId = `ak47_${matchSlug.replace(/\s+/g, '_')}`;
 
             const linkNames = Array.isArray(ev.link_names) ? ev.link_names : [];
             const linksPath = ev.links || '';
@@ -351,6 +371,13 @@ class Ak47LiveProvider extends BaseProvider {
             const matchSlug = this.normalizeStr(title) || 'match';
             const matchId = `ak47_${matchSlug.replace(/\s+/g, '_')}`;
 
+            const tPair1 = (team1 && team2) ? `${this.normalizeStr(team1)}|${this.normalizeStr(team2)}` : null;
+            const tPair2 = (team1 && team2) ? `${this.normalizeStr(team2)}|${this.normalizeStr(team1)}` : null;
+
+            if (finishedSlugs.has(matchSlug) || (tPair1 && (finishedTeamPairs.has(tPair1) || finishedTeamPairs.has(tPair2)))) {
+              continue; // Finished in Section 1; skip resurrecting
+            }
+
             const sourceObj = {
               source: 'ak47live',
               id: entry.streamUrl,
@@ -368,14 +395,17 @@ class Ak47LiveProvider extends BaseProvider {
                 existing.sources.push(sourceObj);
               }
             } else {
+              const known = knownEventMap.get(matchSlug) || (tPair1 && (knownEventMap.get(tPair1) || knownEventMap.get(tPair2)));
+              const matchDate = known ? known.matchDate : '0';
+              const status = known ? known.status : 'LIVE';
               const isMatchup = Boolean(team1 && team2);
               const match = new MatchEntity({
                 id: matchId,
                 title,
                 category,
                 league: entry.groupTitle || '',
-                date: '0',
-                status: 'LIVE',
+                date: matchDate,
+                status,
                 team1: team1 ? { name: team1 } : null,
                 team2: team2 ? { name: team2 } : null,
                 thumbnail_url: isMatchup ? '' : (entry.tvgLogo || ''),

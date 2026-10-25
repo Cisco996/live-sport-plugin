@@ -73,6 +73,13 @@ class LeafProvider extends BaseProvider {
         const cleaned = item.releaseInfo.replace('·', '').replace(/\s+/g, ' ').trim();
         const d = new Date(cleaned);
         if (!isNaN(d.getTime())) matchDate = String(d.getTime());
+      } else {
+        const tsMatch = String(item.id).match(/[-_](1\d{9}|1\d{12})$/);
+        if (tsMatch) {
+          const tsVal = Number(tsMatch[1]);
+          const epochMs = tsMatch[1].length === 10 ? tsVal * 1000 : tsVal;
+          if (epochMs > 0 && Number.isFinite(epochMs)) matchDate = String(epochMs);
+        }
       }
 
       matches.push(new MatchEntity({
