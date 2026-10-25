@@ -106,6 +106,47 @@ function isDembedTarget(url) {
   return url.includes('dembed.st');
 }
 
+// -- impit TLS skip list ------------------------------------------------------
+// rustls (impit's TLS) validates certificates against a curated root store and
+// deterministically rejects some sites Node accepts (livetv.sx serves a chain
+// rustls flags as UnknownIssuer on every handshake). That failure cannot
+// change on retry, yet every new request still paid one doomed TLS handshake
+// plus a warn log before the undici fallback succeeded. Remember such hosts
+// for a cooldown window and route them straight to undici; the TTL self-heals
+// when the site rotates its certificate or impit updates its root store.
+const IMPIT_TLS_SKIP_TTL_MS = Math.max(60 * 1000, Number(process.env.IMPIT_TLS_SKIP_TTL_MS) || 30 * 60 * 1000);
+const IMPIT_TLS_SKIP_MAX = 64;
+const _impitTlsSkipHosts = new Map(); // lowercase hostname -> expiresAt
+
+function isTlsValidationError(errMsg) {
+  return errMsg.includes('InvalidCertificate') || errMsg.includes('UnknownIssuer') || errMsg.includes('certificate has expired');
+}
+
+function impitTlsBlocked(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch (_) { return false; }
+  const until = _impitTlsSkipHosts.get(host);
+  if (until === undefined) return false;
+  if (Date.now() > until) {
+    _impitTlsSkipHosts.delete(host);
+    return false;
+  }
+  return true;
+}
+
+function recordImpitTlsFailure(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch (_) { return; }
+  const isNew = !_impitTlsSkipHosts.has(host);
+  if (isNew && _impitTlsSkipHosts.size >= IMPIT_TLS_SKIP_MAX) {
+    _impitTlsSkipHosts.delete(_impitTlsSkipHosts.keys().next().value);
+  }
+  _impitTlsSkipHosts.set(host, Date.now() + IMPIT_TLS_SKIP_TTL_MS);
+  if (isNew) {
+    console.warn(`[impitClient] impit TLS validation deterministically fails for ${host}; using undici directly for ~${Math.round(IMPIT_TLS_SKIP_TTL_MS / 60000)} min`);
+  }
+}
+
 // -- Shared undici keep-alive agent -------------------------------------------
 const _undiciAgent = new Agent({
   connect: { timeout: 20000, rejectUnauthorized: false },
@@ -273,7 +314,11 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
   const isDamitv = isDamitvTarget(url);
   const isDembed = isDembedTarget(url);
   const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
-  const impit = proxyUrl ? getProxyImpit(proxyUrl) : (isDamitv ? (getVanillaImpit() || getImpit()) : getImpit());
+  // Direct (non-proxied) requests to hosts whose certificate chain impit
+  // deterministically rejects skip the doomed TLS handshake entirely and go
+  // straight to the undici path below.
+  const impit = proxyUrl ? getProxyImpit(proxyUrl)
+    : (isDamitv ? (getVanillaImpit() || getImpit()) : (impitTlsBlocked(url) ? null : getImpit()));
   const maxAttempts = Math.max(1, attempts);
 
   if (isDamitv) {
@@ -360,8 +405,13 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
         if (signal.aborted) throw signal.reason || impitErr;
         lastErr = impitErr;
         const errMsg = String(impitErr);
-        if (errMsg.includes('InvalidCertificate') || errMsg.includes('UnknownIssuer') || errMsg.includes('certificate has expired')) {
-           break;
+        if (isTlsValidationError(errMsg)) {
+          // Deterministic failure: the same handshake cannot succeed on retry.
+          // Record the host for direct requests only — a proxied failure may
+          // be the proxy's fault, and the proxied path must never fall back
+          // to undici anyway (it would bypass the proxy).
+          if (!proxyUrl) recordImpitTlsFailure(url);
+          break;
         }
         if (attempt < maxAttempts) {
            await abortableDelay(800 * attempt, signal);

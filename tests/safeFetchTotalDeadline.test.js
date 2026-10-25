@@ -57,6 +57,13 @@ test('fallback body remains within the original deadline',async()=>{
   const state=track(safeFetch(url,{timeoutMs:50,attempts:1}));await jest.advanceTimersByTimeAsync(60);
   expect(state.error?.code).toBe('ETIMEDOUT');expect(cancelled).toBe(1);expect(request).toHaveBeenCalledTimes(1);
 });
+test('TLS-invalid host skips the doomed impit handshake on later requests',async()=>{
+  fetch.mockRejectedValue(new Error('InvalidCertificate UnknownIssuer'));
+  const first=await safeFetch(url,{timeoutMs:1000,attempts:3});
+  expect(await first.text()).toBe('ok');expect(fetch).toHaveBeenCalledTimes(1);expect(request).toHaveBeenCalledTimes(1);
+  const second=await safeFetch(url,{timeoutMs:1000,attempts:3});
+  expect(await second.text()).toBe('ok');expect(fetch).toHaveBeenCalledTimes(1);expect(request).toHaveBeenCalledTimes(2);
+});
 test('403 fallback timeout is not swallowed as an ordinary 403 response',async()=>{
   fetch.mockResolvedValue({...response(),status:403});request.mockImplementation(async(_u,opts)=>({...undiciResponse(),body:{arrayBuffer:()=>hang(opts.signal)}}));
   const state=track(safeFetch(url,{timeoutMs:50,attempts:1}));await jest.advanceTimersByTimeAsync(60);expect(state.error?.code).toBe('ETIMEDOUT');expect(state.value).toBeUndefined();
