@@ -217,9 +217,8 @@ describe('DaddyLiveProvider', () => {
       expect(stream.name).toBe('DaddyLive');
       expect(stream.title).toContain('A&E USA');
       expect(stream.url).toContain('/api/manifest?url=' + encodeURIComponent(mockStreamUrl));
-      expect(stream.behaviorHints.notWebReady).toBe(true);
-      expect(stream.behaviorHints.proxyHeaders.request.Referer).toBe('https://tiestep.top/');
-      expect(stream.behaviorHints.proxyHeaders.request.Origin).toBe('https://tiestep.top');
+      expect(stream.behaviorHints.notWebReady).toBe(false);
+      expect(stream.behaviorHints.proxyHeaders).toBeUndefined();
     });
 
     test('falls back to EmbedExtractorChain if _econfig is not present', async () => {

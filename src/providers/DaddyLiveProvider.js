@@ -512,14 +512,7 @@ class DaddyLiveProvider extends BaseProvider {
       title: channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`,
       url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`,
       behaviorHints: {
-        notWebReady: true,
-        proxyHeaders: {
-          request: {
-            'Referer': referer,
-            'Origin': origin,
-            'User-Agent': UA
-          }
-        }
+        notWebReady: false
       },
       resolution: 'HD'
     });

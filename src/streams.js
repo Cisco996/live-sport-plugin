@@ -1469,8 +1469,15 @@ async function handleStream(type, id, config) {
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
     
-    // If it's a direct m3u8 stream and not routed through our proxy, mark it notWebReady (unless explicitly web-ready like SprintCDN)
-    if (s.url && s.url.includes('.m3u8') && !s.url.includes('/api/manifest') && s.behaviorHints.notWebReady !== false) {
+    // If routed through our /api/manifest proxy, the stream is already web-ready (headers injected upstream).
+    // Stremio 5 rejects notWebReady live streams with 500 Live media is not supported.
+    if (s.url && s.url.includes('/api/manifest')) {
+      s.behaviorHints.notWebReady = false;
+      if (s.behaviorHints.proxyHeaders) {
+        delete s.behaviorHints.proxyHeaders;
+      }
+    } else if (s.url && s.url.includes('.m3u8') && s.behaviorHints.notWebReady !== false) {
+      // Direct unproxied m3u8 stream needing player-level header injection
       s.behaviorHints.notWebReady = true;
       
       let referer = '';
