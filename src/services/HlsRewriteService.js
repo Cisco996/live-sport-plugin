@@ -253,7 +253,13 @@ async function preprobeManifestSegments(manifestBody, manifestUrl, opts = {}) {
 
   if (urlsToProbe.size === 0) return;
 
-  const probePromises = [...urlsToProbe].map(url =>
+  // Prioritize the live edge (last 4 segments): players begin playback from the
+  // freshest edge, not the historical buffer. Bounding candidates to the latest
+  // segments ensures the concurrent probe slots are spent on the immediate chunks
+  // the player will request.
+  const liveEdgeUrls = [...urlsToProbe].slice(-4);
+
+  const probePromises = liveEdgeUrls.map(url =>
     segmentLengthService.probeContentLength(url, { referer, origin })
   );
 

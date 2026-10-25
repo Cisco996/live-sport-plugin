@@ -138,4 +138,29 @@ describe('rewriteHlsPlaylist — TikTok ByteRange Injection', () => {
 
     probeSpy.mockRestore();
   });
+
+  test('preprobeManifestSegments bounds probes to the latest 4 live-edge segments', async () => {
+    const segments = [];
+    for (let i = 1; i <= 10; i++) {
+      segments.push('#EXTINF:6.000,');
+      segments.push(`https://p16-common-sign.tiktokcdn-us.com/tos/probe_seg_${i}.image`);
+    }
+    const rawM3u8 = ['#EXTM3U', '#EXT-X-VERSION:3', ...segments].join('\n');
+
+    const probeSpy = jest.spyOn(segmentLengthService, 'probeContentLength').mockResolvedValue(1000000);
+
+    await preprobeManifestSegments(rawM3u8, manifestUrl, {
+      referer: 'https://embed.st/',
+      origin: 'https://embed.st'
+    });
+
+    // Out of 10 segments, only the freshest 4 (7, 8, 9, 10) on the live edge must be probed
+    expect(probeSpy).toHaveBeenCalledTimes(4);
+    expect(probeSpy).toHaveBeenCalledWith('https://p16-common-sign.tiktokcdn-us.com/tos/probe_seg_7.image', expect.anything());
+    expect(probeSpy).toHaveBeenCalledWith('https://p16-common-sign.tiktokcdn-us.com/tos/probe_seg_8.image', expect.anything());
+    expect(probeSpy).toHaveBeenCalledWith('https://p16-common-sign.tiktokcdn-us.com/tos/probe_seg_9.image', expect.anything());
+    expect(probeSpy).toHaveBeenCalledWith('https://p16-common-sign.tiktokcdn-us.com/tos/probe_seg_10.image', expect.anything());
+
+    probeSpy.mockRestore();
+  });
 });
