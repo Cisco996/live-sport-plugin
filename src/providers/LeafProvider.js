@@ -68,11 +68,19 @@ class LeafProvider extends BaseProvider {
       const cleanId = item.id.replace(/^streamed:/, '');
       const category = this.normalizeCategory(item.category || (Array.isArray(item.genres) ? item.genres[0] : 'other'));
 
+      let matchDate = '0';
+      if (item.releaseInfo && typeof item.releaseInfo === 'string' && item.releaseInfo !== 'LIVE') {
+        const cleaned = item.releaseInfo.replace('·', '').replace(/\s+/g, ' ').trim();
+        const d = new Date(cleaned);
+        if (!isNaN(d.getTime())) matchDate = String(d.getTime());
+      }
+
       matches.push(new MatchEntity({
         id: `leaf_${cleanId}`,
         aliasIds: [item.id, cleanId],
         title: item.name,
         category,
+        date: matchDate,
         status: 'live',
         sources: [{
           source: 'leaf',

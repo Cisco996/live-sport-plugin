@@ -255,7 +255,7 @@ function parseFavoriteTeams(conf) {
  */
 function isFavoriteMatch(match, favorites) {
   if (!favorites || favorites.length === 0) return false;
-  if (!match || match.category === 'networks' || match.isChannel || !match.date || match.date === '0') return false;
+  if (!match || match.category === 'networks' || match.isChannel) return false;
   const title = foldText(match && match.title);
   if (!title) return false;
 
@@ -530,7 +530,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // Check if we have a locally defined, verified hi-res logo for this specific channel name.
   // ONLY for continuous 24/7 TV channels (e.g. networks catalog) — NEVER discard provider thumbnails
   // for sporting events, motorsport, or replays!
-  const is247Channel = match.category === 'networks' || match.isChannel || (match.id && (match.id.startsWith('dlv_ch_') || match.id.startsWith('cdn_ch_') || match.id.startsWith('sktech_ch_')));
+  const is247Channel = (match.category === 'networks' || match.isChannel || (match.id && (match.id.startsWith('dlv_ch_') || match.id.startsWith('cdn_ch_') || match.id.startsWith('sktech_ch_') || match.id.startsWith('vavoo_') || match.id.includes('_ch_')))) && !isMatchup;
   const customLogo = (is247Channel || (!isReplay && !isMotorsport)) ? getChannelLogo(match.title) : null;
   if (customLogo && !isMatchup && !isReplay && !isMotorsport) {
     isChannelThumbnail = false; // We want to use it as the main artwork, not a tiny badge
@@ -651,7 +651,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
       leagueBadge: leagueEmblem,
       channel: broadcasterName || (isChannelLike ? match.title : null),
       channelBadge: channelMark,
-      status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
+      status: isReplay ? 'replay' : (isLive ? 'live' : (is247Channel ? '247' : 'upcoming')),
       score: isReplay ? null : match.score,
       time: formatKickoffForCard(match.date, config),
       shape: reqType === 'series' ? 'poster' : 'landscape'
@@ -717,7 +717,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     } catch (_) {}
   }
 
-  const is247 = !isReplay && (match.category === 'networks' || !match.date || match.date === '0');
+  const is247 = !isReplay && is247Channel;
 
   // ─── Enrich team logos via TeamLogoService (cricket, football, etc.) ───
   let teamLogoService = null;
@@ -1394,7 +1394,7 @@ async function handleCatalogUncached(type, id, extra, config) {
       const now = Date.now();
       filteredMatches = matches.filter(m => {
         // Your Teams strictly takes from live and upcoming events only (no 24/7 channels)
-        if (m.category === 'networks' || m.isChannel || !m.date || m.date === '0') return false;
+        if (m.category === 'networks' || m.isChannel) return false;
         const isLive = isMatchLive(m);
         const isUpcoming = !isLive && (getKickoff(m.date) || 0) > now;
         if (!isLive && !isUpcoming) return false;
