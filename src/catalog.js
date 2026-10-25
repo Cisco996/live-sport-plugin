@@ -726,18 +726,24 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const is247 = !isReplay && is247Channel;
 
   // ─── Enrich team logos via TeamLogoService (cricket, football, etc.) ───
+  // Build the projected team objects locally instead of writing them back to
+  // the shared read-only match: the old write-back violated the CacheService
+  // read-only contract and leaked one request's enrichment into every other
+  // consumer of the cached row.
   let teamLogoService = null;
   try { teamLogoService = container.resolve('teamLogoService'); } catch (_) {}
-  if (teamLogoService && team1Name) {
-    const existingLogo = match.team1 && match.team1.logo;
-    const logo1 = existingLogo || teamLogoService.getCachedLogo(team1Name);
-    match.team1 = { ...(match.team1 || {}), name: team1Name, logo: logo1 || null };
-  }
-  if (teamLogoService && team2Name) {
-    const existingLogo = match.team2 && match.team2.logo;
-    const logo2 = existingLogo || teamLogoService.getCachedLogo(team2Name);
-    match.team2 = { ...(match.team2 || {}), name: team2Name, logo: logo2 || null };
-  }
+  const team1Out = team1Name
+    ? {
+        name: team1Name,
+        logo: ((match.team1 && match.team1.logo) || (teamLogoService ? teamLogoService.getCachedLogo(team1Name) : null)) || null
+      }
+    : null;
+  const team2Out = team2Name
+    ? {
+        name: team2Name,
+        logo: ((match.team2 && match.team2.logo) || (teamLogoService ? teamLogoService.getCachedLogo(team2Name) : null)) || null
+      }
+    : null;
 
   // Providers only supply a score for a fixture that is under way or finished.
   const scoreSuffix = match.score ? ` (${match.score})` : '';
@@ -771,8 +777,8 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     description: desc,
     cast: cast,
     // Include team1/team2 with logos for Stremio/Nuvio client-side rendering
-    team1: team1Name ? { name: team1Name, logo: (match.team1 && match.team1.logo) || null } : null,
-    team2: team2Name ? { name: team2Name, logo: (match.team2 && match.team2.logo) || null } : null,
+    team1: team1Out,
+    team2: team2Out,
     behaviorHints: {
       defaultVideoId: isSeriesReplay ? `nuvio_sport_${match.id}:1:1` : `nuvio_sport_${match.id}`
     }
@@ -942,6 +948,11 @@ function _hubMetaCacheSet(key, data, ttlMs, revision) {
 const CATALOG_PAGE_CACHE_MAX = 150;
 const CATALOG_PAGE_TTL_MS = 5 * 60 * 1000; // safety net: never serve a page older than 5 min
 const _catalogPageCache = new Map(); // pageKey -> { gen, result, expiresAt }
+// Lazily-built search haystacks, keyed by match object. A WeakMap keeps the
+// memo per generation (matches are replaced wholesale each sync, aging old
+// entries out with the objects) WITHOUT pinning request-derived strings onto
+// the shared read-only cache rows the way the old m._searchHaystack did.
+const _searchHaystacks = new WeakMap();
 let _logoHookWired = false;
 
 function _wireLogoInvalidationHook() {
@@ -1273,11 +1284,13 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     if (m.sources.some(s => s.source === 'timstreams')) return false;
     if (!m.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
 
-    // Self-healing: if category is mistakenly football but title/league indicates basketball
+    // Self-healing: if category is mistakenly football but title/league indicates basketball.
+    // Local-only: the aggregator's _precompute performs and persists the same
+    // correction at sync time, so writing it back here only violated the
+    // read-only cache contract without adding information.
     let cat = m.category;
     if (cat === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${m.title || ''} ${m.league || ''}`)) {
       cat = 'basketball';
-      m.category = 'basketball';
     }
 
     if (targetSport === 'other') {
@@ -1644,16 +1657,18 @@ async function handleCatalogUncached(type, id, extra, config) {
         if (title.includes(searchRaw) || league.includes(searchRaw)) return true;
 
         // Multi-token match: lazily memoized search haystack avoids repeated string join allocations
-        if (!m._searchHaystack) {
+        let haystack = _searchHaystacks.get(m);
+        if (haystack === undefined) {
           const baseTitle = (m.baseTitle || '').toLowerCase();
           const canonicalTitle = (m.canonicalTitle || '').toLowerCase();
           const sourceNames = (m.sources && Array.isArray(m.sources))
             ? m.sources.map(s => `${s.channelName || ''} ${s.canonicalChannel || ''}`).join(' ').toLowerCase()
             : '';
-          m._searchHaystack = `${title} ${baseTitle} ${canonicalTitle} ${league} ${sourceNames}`;
+          haystack = `${title} ${baseTitle} ${canonicalTitle} ${league} ${sourceNames}`;
+          _searchHaystacks.set(m, haystack);
         }
 
-        return tokens.every(tok => m._searchHaystack.includes(tok));
+        return tokens.every(tok => haystack.includes(tok));
       });
     }
   }
