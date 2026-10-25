@@ -860,6 +860,13 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
 const META_CACHE_MAX = 1000;
 const _metaCache = new Map(); // key → { data, expiresAt, revision }
 
+// Replay-hub metas are 2.5 MB+ JSON payloads, so the 1000-entry count cap on
+// _metaCache is byte-blind for them — a sweep over hub ids could park hundreds
+// of MB in a "bounded" cache. Hubs get their own store with a small count cap
+// (~60 MB ceiling) and identical entry/eviction semantics.
+const HUB_META_CACHE_MAX = 24;
+const _hubMetaCache = new Map(); // key → { data, expiresAt, revision }
+
 function _metaCacheRevision() {
   const cacheService = container.resolve('cacheService');
   // Poll for cross-worker snapshots before trusting a memo hit. This returns
@@ -896,6 +903,25 @@ function _metaCacheSet(key, data, ttlMs, revision) {
   // may advance it; the next request will then rebuild instead of treating
   // an older response as belonging to the new snapshot.
   _metaCache.set(key, { data, expiresAt: Date.now() + ttlMs, revision });
+}
+
+function _hubMetaCacheGet(key, revision) {
+  const entry = _hubMetaCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt || entry.revision !== revision) {
+    _hubMetaCache.delete(key);
+    return null;
+  }
+  _hubMetaCache.delete(key);
+  _hubMetaCache.set(key, entry);
+  return entry.data;
+}
+
+function _hubMetaCacheSet(key, data, ttlMs, revision) {
+  if (_hubMetaCache.size >= HUB_META_CACHE_MAX) {
+    _hubMetaCache.delete(_hubMetaCache.keys().next().value);
+  }
+  _hubMetaCache.set(key, { data, expiresAt: Date.now() + ttlMs, revision });
 }
 
 // ─── Catalog page memo ────────────────────────────────────────────────────────
@@ -971,7 +997,7 @@ async function buildReplayHubMeta(id, config = {}) {
   // Replay hubs generate 2.5 MB+ JSON payloads — cache them for 30 minutes.
   const _rhmCacheKey = _metaCacheKey(id, config, 'series');
   const _rhmRevision = _metaCacheRevision();
-  const _rhmCached = _metaCacheGet(_rhmCacheKey, _rhmRevision);
+  const _rhmCached = _hubMetaCacheGet(_rhmCacheKey, _rhmRevision);
   if (_rhmCached) return _rhmCached;
 
   const cacheService = container.resolve('cacheService');
@@ -1087,7 +1113,7 @@ async function buildReplayHubMeta(id, config = {}) {
       cacheMaxAge: 1800,
       staleRevalidate: 3600
     };
-    _metaCacheSet(_rhmCacheKey, _datehubResult, 30 * 60 * 1000, _rhmRevision);
+    _hubMetaCacheSet(_rhmCacheKey, _datehubResult, 30 * 60 * 1000, _rhmRevision);
     return _datehubResult;
   }
 
@@ -1204,7 +1230,7 @@ async function buildReplayHubMeta(id, config = {}) {
     cacheMaxAge: 1800,
     staleRevalidate: 3600
   };
-  _metaCacheSet(_rhmCacheKey, _sporthubResult, 30 * 60 * 1000, _rhmRevision);
+  _hubMetaCacheSet(_rhmCacheKey, _sporthubResult, 30 * 60 * 1000, _rhmRevision);
   return _sporthubResult;
 }
 

@@ -864,6 +864,14 @@ app.use('/api', createProxyMiddleware({
 // Intercepts /manifest.json, /catalog/*, /meta/*, and /stream/* responses to
 // dynamically rewrite all internal proxy URLs (/img, /watch, /api/manifest)
 // to match the client's incoming Host and Protocol.
+
+// Rewriting can only fire when one of these prefixes appears somewhere in the
+// payload (both the relative and absolute-URL branches below match on them).
+// A substring scan is far cheaper than JSON-parsing multi-megabyte hub
+// responses that carry no relative URLs, so payloads without any prefix are
+// passed through untouched. Keep in sync with the prefix lists in rewriteUrl.
+const REWRITE_SCAN_PREFIXES = ['/img', '/watch', '/api/manifest', '/api/dash', '/logo', '/api/mp4proxy', '/api/fastmp4', '/api/hlschunk', '/api/hls', '/hls', '/posters', '/donate'];
+
 app.use((req, res, next) => {
   const isAddonRoute = req.path === '/manifest.json' || 
                        req.path.endsWith('/manifest.json') ||
@@ -890,9 +898,14 @@ app.use((req, res, next) => {
   res.end = function (chunk, encoding, callback) {
     if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 
+    let bodyBuffer = null;
     if (chunks.length > 0) {
-      const bodyBuffer = Buffer.concat(chunks);
+      bodyBuffer = Buffer.concat(chunks);
       const bodyString = bodyBuffer.toString('utf8');
+
+      if (!REWRITE_SCAN_PREFIXES.some((p) => bodyString.includes(p))) {
+        return originalEnd.call(res, bodyBuffer, encoding, callback);
+      }
 
       try {
         const body = JSON.parse(bodyString);
@@ -960,7 +973,10 @@ app.use((req, res, next) => {
       }
     }
 
-    const finalBuffer = Buffer.concat(chunks);
+    // bodyBuffer already holds the exact bytes when a body was captured;
+    // re-concatenating chunks copies the whole payload a second time on every
+    // unmodified response.
+    const finalBuffer = bodyBuffer || Buffer.concat(chunks);
     originalEnd.call(res, finalBuffer, encoding, callback);
   };
 

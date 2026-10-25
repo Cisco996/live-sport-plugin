@@ -171,7 +171,15 @@ class CronService {
       const { prewarmMatch, prewarmSkipProvidersSet } = require('../streams');
       const resolveCache = this.streamResolveCache;
       const skip = prewarmSkipProvidersSet();
-      const matches = this.cacheService ? this.cacheService.getMatches() : [];
+      // Filtering/sorting below only reads, so the defensive deep clone of
+      // getMatches() is pure GC churn on this 3-minute tick. Use the internal
+      // read-only array and slice() so the in-place sort reorders our copy,
+      // not the master catalog. Only the matches actually prewarmed get
+      // cloned (in the loop below) since resolve paths may mutate them.
+      const roMatches = this.cacheService
+        ? (this.cacheService.getMatchesReadOnly ? this.cacheService.getMatchesReadOnly() : this.cacheService.getMatches())
+        : [];
+      const matches = Array.isArray(roMatches) ? roMatches.slice() : roMatches;
 
       const live = matches.filter((m) => {
         if (!m || !m.sources || m.sources.length === 0) return false;
@@ -216,7 +224,10 @@ class CronService {
       // (Heavy embed-family sources are excluded upstream via
       // PREWARM_SKIP_PROVIDERS in prewarmMatch — see streams.js.)
       for (const m of todo) {
-        await prewarmMatch(m, null, Number.MAX_SAFE_INTEGER).catch(() => {});
+        // Deep-clone only the handful of selected matches (plain JSON shapes;
+        // see CacheService._cloneMatch) — resolve paths may mutate sources.
+        const clone = JSON.parse(JSON.stringify(m));
+        await prewarmMatch(clone, null, Number.MAX_SAFE_INTEGER).catch(() => {});
       }
     } catch (err) {
       console.error('[CronService] Prewarm failed:', err.message);

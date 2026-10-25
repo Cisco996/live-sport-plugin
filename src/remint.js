@@ -183,7 +183,10 @@ async function attemptRemint(rck, heldUrl = '') {
     const candidates = rckCandidates(rck);
     if (candidates.length === 0) return null;
 
-    const matches = container.resolve('cacheService').getMatches();
+    // Read-only lookup (find by id, no mutation, no sort): the defensive
+    // clone inside getMatches() is unnecessary churn on this hot path.
+    const _cs = container.resolve('cacheService');
+    const matches = _cs.getMatchesReadOnly ? _cs.getMatchesReadOnly() : _cs.getMatches();
     let resolved = null;
     for (const c of candidates) {
       const match = matches.find(m => m && m.id === c.matchId);
