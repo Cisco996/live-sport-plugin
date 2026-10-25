@@ -152,6 +152,12 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
   let currentDuration = null;
   let hasPrecedingByteRange = false;
 
+  const requiresByteRange = process.env.USE_TIKTOK_BYTERANGE_307 !== 'off' && lines.some(l => {
+    const t = l.trim();
+    if (!t || t.startsWith('#')) return false;
+    return isTikTokCloakedSegment(resolveSegmentUrl(t, manifestUrl));
+  });
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -162,7 +168,21 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
     }
 
     if (trimmed.startsWith('#')) {
-      if (trimmed.startsWith('#EXTINF:')) {
+      if (trimmed.startsWith('#EXT-X-VERSION:')) {
+        if (requiresByteRange) {
+          const v = parseInt(trimmed.slice('#EXT-X-VERSION:'.length).trim(), 10);
+          if (isNaN(v) || v < 4) {
+            rewritten.push('#EXT-X-VERSION:4');
+            continue;
+          }
+        }
+      } else if (trimmed === '#EXTM3U') {
+        rewritten.push(line);
+        if (requiresByteRange && !manifestBody.includes('#EXT-X-VERSION:')) {
+          rewritten.push('#EXT-X-VERSION:4');
+        }
+        continue;
+      } else if (trimmed.startsWith('#EXTINF:')) {
         const durMatch = trimmed.match(/^#EXTINF:([0-9.]+)/i);
         if (durMatch) {
           currentDuration = parseFloat(durMatch[1]);

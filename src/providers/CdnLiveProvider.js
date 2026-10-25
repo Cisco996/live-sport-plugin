@@ -414,7 +414,7 @@ class CdnLiveProvider extends BaseProvider {
         title: `CDNLiveTV (${name})`,
         url: m3u8Url,
         behaviorHints: {
-          notWebReady: true,
+          notWebReady: false,
           proxyHeaders: {
             request: {
               'Origin': 'https://cdnlivetv.tv',

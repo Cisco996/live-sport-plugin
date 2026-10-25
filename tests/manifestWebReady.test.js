@@ -79,7 +79,7 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
     expect(dlv.behaviorHints.proxyHeaders).toBeUndefined();
   });
 
-  test('preserves notWebReady: true and sets proxyHeaders for direct unproxied m3u8 streams', async () => {
+  test('enforces notWebReady: false and sets proxyHeaders for direct unproxied m3u8 streams', async () => {
     jest.spyOn(container.resolve('daddyLiveProvider'), 'resolveStream').mockResolvedValue([
       {
         name: 'DaddyLive',
@@ -96,7 +96,7 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
 
     const direct = res.streams.find(s => s.url && s.url.includes('direct.daddylive.st'));
     expect(direct).toBeDefined();
-    expect(direct.behaviorHints.notWebReady).toBe(true);
+    expect(direct.behaviorHints.notWebReady).toBe(false);
     expect(direct.behaviorHints.proxyHeaders).toBeDefined();
     expect(direct.behaviorHints.proxyHeaders.request.Referer).toBe('https://thedaddy.pk/');
   });

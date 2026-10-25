@@ -143,9 +143,7 @@ class EmbedStProvider extends BaseProvider {
               name: 'EmbedSt',
               title: `[Direct] ${matchTitle}`,
               url: proxyUrl,
-              behaviorHints: { 
-                notWebReady: true
-              },
+              behaviorHints: { notWebReady: false },
               resolution: 'HD'
             }));
           } else {
@@ -164,7 +162,7 @@ class EmbedStProvider extends BaseProvider {
                 name: 'EmbedSt',
                 title: `[Direct] ${matchTitle}`,
                 url: proxyUrl,
-                behaviorHints: { notWebReady: true },
+                behaviorHints: { notWebReady: false },
                 resolution: 'HD'
               }));
             }

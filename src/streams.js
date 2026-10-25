@@ -1501,34 +1501,33 @@ async function handleStream(type, id, config) {
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
     
-    // If routed through our /api/manifest proxy, the stream is already web-ready (headers injected upstream).
-    // Stremio 5 rejects notWebReady live streams with 500 Live media is not supported.
-    if (s.url && s.url.includes('/api/manifest')) {
+    // Live streams must never be marked notWebReady: true; Stremio 5 /hlsv2 transcoder crashes on live media.
+    if (s.url && s.url.includes('.m3u8')) {
       s.behaviorHints.notWebReady = false;
-      if (s.behaviorHints.proxyHeaders) {
-        delete s.behaviorHints.proxyHeaders;
-      }
-    } else if (s.url && s.url.includes('.m3u8') && s.behaviorHints.notWebReady !== false) {
-      // Direct unproxied m3u8 stream needing player-level header injection
-      s.behaviorHints.notWebReady = true;
-      
-      let referer = '';
-      if (providerName === 'DaddyLive') referer = 'https://thedaddy.pk/';
-      else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
-      else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
-      else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
-      else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
-      else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
-      else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
-      
-      if (referer) {
-        if (!s.behaviorHints.proxyHeaders) {
-          s.behaviorHints.proxyHeaders = {
-            request: {
-              "Referer": referer,
-              "Origin": referer
-            }
-          };
+      if (s.url.includes('/api/manifest')) {
+        if (s.behaviorHints.proxyHeaders) {
+          delete s.behaviorHints.proxyHeaders;
+        }
+      } else {
+        // Direct unproxied m3u8 stream needing player-level header injection
+        let referer = '';
+        if (providerName === 'DaddyLive') referer = 'https://thedaddy.pk/';
+        else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
+        else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
+        else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
+        else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
+        else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
+        else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
+        
+        if (referer) {
+          if (!s.behaviorHints.proxyHeaders) {
+            s.behaviorHints.proxyHeaders = {
+              request: {
+                "Referer": referer,
+                "Origin": referer
+              }
+            };
+          }
         }
       }
     }
