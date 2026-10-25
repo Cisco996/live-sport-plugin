@@ -1126,8 +1126,8 @@ async function handleStream(type, id, config) {
   // next request. Previously every source had to settle before anything was
   // returned, so one slow provider (WatchFooty's embed chain: ~56s/variant)
   // stalled the whole response.
-  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 8000);
-  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 2500), HARD_DEADLINE_MS);
+  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
+  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000), HARD_DEADLINE_MS);
   const resolutionStartedAt = Date.now();
 
   const inFlight = [];        // per-source promise + settled result for the fallback wait
@@ -1166,9 +1166,7 @@ async function handleStream(type, id, config) {
   // This guarantees fast streams (e.g. Vavoo) do not cut off DaddyLive with an early return,
   // while still returning instantly as soon as DaddyLive completes (or when already cached).
   const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
-  // If no streams have arrived yet, wait up to the remaining hard budget for in-flight sources.
-  // If we already have playable streams, return immediately — do not stall for 15s waiting for a dead/hanging priority-1 source.
-  const shouldWait = streams.length === 0 && inFlight.length > 0;
+  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0) && inFlight.length > 0;
 
   if (shouldWait) {
     const remaining = Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
