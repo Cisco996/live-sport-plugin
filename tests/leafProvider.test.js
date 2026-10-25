@@ -88,7 +88,7 @@ describe('LeafProvider Unit Tests', () => {
   });
 
   describe('resolveStream()', () => {
-    test('strictly isolates papacito.cfd streams and swaps in master token', async () => {
+    test('strictly isolates papacito.cfd streams and preserves upstream signed playback token', async () => {
       const mockStreamsResponse = {
         streams: [
           {
@@ -130,24 +130,48 @@ describe('LeafProvider Unit Tests', () => {
       expect(streams).toHaveLength(2);
 
       // Stream 1: 1080p FHD
-      expect(streams[0].url).toBe('https://papacito.cfd/m3u/1820218/live.m3u8?token=E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi');
+      expect(streams[0].url).toBe('https://papacito.cfd/m3u/1820218/live.m3u8?ft=temporary_jwt_token');
       expect(streams[0].resolution).toBe('1080p');
       expect(streams[0].quality).toBe('FHD');
       expect(streams[0].bitrate).toBe('6.2 Mbps');
       expect(streams[0].name).toBe('Leaf [FHD]');
       expect(streams[0].title).toBe('(US: NBC SPORTS BAY AREA) FHD');
-      expect(streams[0].behaviorHints.notWebReady).toBe(true);
+      expect(streams[0].behaviorHints.notWebReady).toBe(false);
       expect(streams[0]._source).toBe('leaf');
 
       // Stream 2: 720p HD
-      expect(streams[1].url).toBe('https://papacito.cfd/m3u/1413072/live.m3u8?token=E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi');
+      expect(streams[1].url).toBe('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt');
       expect(streams[1].resolution).toBe('720p');
       expect(streams[1].quality).toBe('HD');
       expect(streams[1].bitrate).toBe('3.5 Mbps');
       expect(streams[1].name).toBe('Leaf [HD]');
       expect(streams[1].title).toBe('(GSW Feed) HD');
-      expect(streams[1].behaviorHints.notWebReady).toBe(true);
+      expect(streams[1].behaviorHints.notWebReady).toBe(false);
       expect(streams[1]._source).toBe('leaf');
+    });
+
+
+    test('falls back to minted master token when upstream URL lacks query token', async () => {
+      const mockStreamsResponse = {
+        streams: [
+          {
+            name: 'Leaf · Test Stream',
+            title: '1920x1080 · Stereo · ~6.2 Mbps',
+            url: 'https://papacito.cfd/m3u/999888/live.m3u8',
+            behaviorHints: { notWebReady: true }
+          }
+        ]
+      };
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockStreamsResponse
+      });
+
+      const streams = await provider.resolveStream('streamed:test-fixture', 'football', 'Test vs Match');
+      expect(streams).toHaveLength(1);
+      expect(streams[0].url).toBe('https://papacito.cfd/m3u/999888/live.m3u8?token=E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi');
+      expect(streams[0].behaviorHints.notWebReady).toBe(false);
     });
 
     test('returns empty array when upstream stream resolution fails', async () => {

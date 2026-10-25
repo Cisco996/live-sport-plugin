@@ -135,13 +135,15 @@ class LeafProvider extends BaseProvider {
       // STRICT ISOLATION: Discard any stream that is not papacito.cfd (no streamed.pk, no paywalled redirects)
       if (!st.url.includes('papacito.cfd')) continue;
 
-      // Extract slug from /m3u/<slug>/live.m3u8
-      const slugMatch = st.url.match(/\/m3u\/([^/?#]+)\/live\.m3u8/);
-      if (!slugMatch || !slugMatch[1]) continue;
-      const slug = slugMatch[1];
-
-      // Mint direct playback URL using our master token
-      const directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
+      // Preserve upstream signed playback URL (which includes the valid ?ft= JWT).
+      // Fallback to minted master token only if upstream URL has no query parameters.
+      let directUrl = st.url;
+      if (!st.url.includes('?')) {
+        const slugMatch = st.url.match(/\/m3u\/([^/?#]+)\/live\.m3u8/);
+        if (!slugMatch || !slugMatch[1]) continue;
+        const slug = slugMatch[1];
+        directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
+      }
 
       const rawName = st.name || '';
       const rawTitle = st.title || '';
@@ -189,7 +191,7 @@ class LeafProvider extends BaseProvider {
         quality,
         bitrate,
         behaviorHints: {
-          notWebReady: true
+          notWebReady: false
         },
         _source: 'leaf'
       }));
