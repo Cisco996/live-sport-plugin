@@ -9,11 +9,17 @@
  *  - .m3u8  → /api/manifest?url=...&referer=...&origin=...(+rckSuffix)
  *  - TikTok / ByteDance cloaked segments (.image / ~tplv-obj / tiktokcdn):
  *    Zero-Bandwidth Byte-Range exploit:
- *    1. Injects `#EXT-X-BYTERANGE:<length>@42`
- *    2. Rewrites segment URI to `/api/hls/resource/<token>/media.ts?psig=<hmac>`
- *    3. The 307 endpoint immediately redirects the player's Range request directly to TikTok CDN.
- *    4. TikTok CDN slices off the 42 fake WebP bytes at the CDN edge!
- *       Net VPS bandwidth bleed: 0 KB/s.
+ *    1. Injects `#EXT-X-BYTERANGE:<length>@42` (needs EXT-X-VERSION >= 4).
+ *    2. Addresses the segment according to TIKTOK_SEGMENT_MODE
+ *       (see segmentAddressMode):
+ *       direct (default) -> the upstream CDN URI itself. The player range-requests
+ *                           the CDN, and the CDN slices off the 42 fake WebP
+ *                           bytes at its own edge. VPS bandwidth: 0 KB/s.
+ *       redirect         -> /api/hls/resource/<token>/media.ts?psig=<hmac>, a 307
+ *                           hop to the CDN. ExoPlayer will not follow the
+ *                           cross-protocol (http addon -> https CDN) redirect,
+ *                           so this survives only as a rollback switch.
+ *       proxy            -> CF worker / /api/hlschunk (costs server bandwidth).
  *  - disguised pure MPEG-TS (.png/.webp/.js, no .ts) → append '#.ts' hint
  *  - anything else → absolute URL as-is
  */
@@ -69,6 +75,32 @@ function resolveSegmentUrl(segmentUri, manifestUrl) {
 }
 
 /**
+ * How a cloaked (ByteDance / TikTok) segment is addressed to the player.
+ *
+ *  direct   - emit the upstream CDN URI verbatim; the player range-requests it
+ *             itself. #EXT-X-BYTERANGE:len@42 is already in the playlist, so the
+ *             player skips the fake WebP header with no hop through us. DEFAULT.
+ *             The CDN answers 206 with Access-Control-Allow-Origin: * and needs
+ *             none of our headers, so removing the hop loses nothing.
+ *  redirect - emit /api/hls/resource/<token>/media.ts and bounce the Range
+ *             request to the CDN with a 307. NOT ExoPlayer-safe: Media3
+ *             DefaultHttpDataSource does not follow cross-protocol redirects
+ *             (http addon -> https CDN), so the player is handed the 307 and
+ *             fails. Kept as a rollback switch only.
+ *  proxy    - stream the bytes through a CF worker / /api/hlschunk (bandwidth).
+ *
+ * USE_TIKTOK_BYTERANGE_307=off keeps its historical meaning: proxy.
+ *
+ * @returns {'direct'|'redirect'|'proxy'}
+ */
+function segmentAddressMode() {
+  if (process.env.USE_TIKTOK_BYTERANGE_307 === 'off') return 'proxy';
+  const mode = String(process.env.TIKTOK_SEGMENT_MODE || '').trim().toLowerCase();
+  if (mode === 'direct' || mode === 'redirect' || mode === 'proxy') return mode;
+  return 'direct';
+}
+
+/**
  * Build the signed 307 redirect URL for a cloaked TikTok segment.
  */
 function buildByteRangeRedirectUrl(absoluteUrl, opts = {}) {
@@ -100,8 +132,10 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   }
 
   if (isTikTokCloakedSegment(absoluteUrl)) {
-    // If explicitly disabled via environment variable, use legacy CF worker budget pool
-    if (process.env.USE_TIKTOK_BYTERANGE_307 === 'off') {
+    const mode = segmentAddressMode();
+
+    // Explicit opt-out: legacy CF worker budget pool
+    if (mode === 'proxy') {
       const pick = workerPool.pick(absoluteUrl);
       if (pick) {
         let workerChunkUrl = `${pick.url}/seg.ts?url=${encodeURIComponent(absoluteUrl)}`;
@@ -120,8 +154,13 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
       return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
     }
 
-    // Default: High-performance Zero-Bandwidth Byte-Range 307 Redirect
-    return buildByteRangeRedirectUrl(absoluteUrl, opts);
+    if (mode === 'redirect') {
+      // Legacy zero-bandwidth 307 hop (not ExoPlayer-safe; see segmentAddressMode)
+      return buildByteRangeRedirectUrl(absoluteUrl, opts);
+    }
+
+    // Default: hand the CDN URI to the player; #EXT-X-BYTERANGE does the skipping.
+    return absoluteUrl;
   }
 
   // Plain MPEG-TS segments stream directly from the upstream CDN (0 VPS bandwidth bleeding).
@@ -152,7 +191,7 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
   let currentDuration = null;
   let hasPrecedingByteRange = false;
 
-  const requiresByteRange = process.env.USE_TIKTOK_BYTERANGE_307 !== 'off' && lines.some(l => {
+  const requiresByteRange = segmentAddressMode() !== 'proxy' && lines.some(l => {
     const t = l.trim();
     if (!t || t.startsWith('#')) return false;
     return isTikTokCloakedSegment(resolveSegmentUrl(t, manifestUrl));
@@ -215,7 +254,8 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
     }
 
     if (isTikTokCloakedSegment(absoluteUrl)) {
-      if (process.env.USE_TIKTOK_BYTERANGE_307 === 'off') {
+      const mode = segmentAddressMode();
+      if (mode === 'proxy') {
         rewritten.push(rewriteHlsUri(trimmed, manifestUrl, opts));
       } else {
         if (!hasPrecedingByteRange) {
@@ -227,7 +267,7 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
           });
           rewritten.push(`#EXT-X-BYTERANGE:${segmentLength}@42`);
         }
-        rewritten.push(buildByteRangeRedirectUrl(absoluteUrl, opts));
+        rewritten.push(mode === 'redirect' ? buildByteRangeRedirectUrl(absoluteUrl, opts) : absoluteUrl);
       }
       currentDuration = null;
       hasPrecedingByteRange = false;
@@ -291,6 +331,7 @@ async function preprobeManifestSegments(manifestBody, manifestUrl, opts = {}) {
 
 module.exports = {
   resolveSegmentUrl,
+  segmentAddressMode,
   rewriteHlsUri,
   rewriteHlsPlaylist,
   preprobeManifestSegments,

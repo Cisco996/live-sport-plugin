@@ -22,7 +22,7 @@ describe('rewriteHlsPlaylist — TikTok ByteRange Injection', () => {
     expect(isTikTokCloakedSegment('https://normal-cdn.example.com/segment_1.ts')).toBe(false);
   });
 
-  test('injects #EXT-X-BYTERANGE:<length>@42 and rewrites segment to 307 redirect URL', () => {
+  test('injects #EXT-X-BYTERANGE:<length>@42 and hands the CDN URI to the player', () => {
     const rawM3u8 = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
@@ -49,19 +49,47 @@ describe('rewriteHlsPlaylist — TikTok ByteRange Injection', () => {
 
     // Verify segment URI line immediately follows
     const uriLine1 = lines[byteRangeIndex1 + 1];
-    expect(uriLine1).toMatch(/^https:\/\/nuviosports\.xyz\/api\/hls\/resource\/[^/]+\/media\.ts\?psig=/);
+    // The player must talk to the CDN itself. The signed /api/hls/resource hop
+    // is gone by default: Media3 DefaultHttpDataSource does not follow the
+    // cross-protocol (http addon -> https CDN) 307 it used to answer with.
+    expect(uriLine1).toBe('https://p16-common-sign.tiktokcdn-us.com/tos-useast8-v-5300-tx2/seg1.image');
+    expect(rewritten).not.toContain('/api/hls/resource');
+  });
 
-    // Extract token and verify signature
-    const match = uriLine1.match(/\/api\/hls\/resource\/([^/]+)\/media\.ts\?psig=([^&\s]+)/);
-    expect(match).not.toBeNull();
-    const token = match[1];
-    const psig = decodeURIComponent(match[2]);
+  test('TIKTOK_SEGMENT_MODE=redirect still emits a signed 307 hop', () => {
+    const saved = process.env.TIKTOK_SEGMENT_MODE;
+    process.env.TIKTOK_SEGMENT_MODE = 'redirect';
+    try {
+      const rawM3u8 = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXTINF:6.000,',
+        'https://p16-common-sign.tiktokcdn-us.com/tos-useast8-v-5300-tx2/seg1.image'
+      ].join('\n');
 
-    const decoded = byteRangeSigner.verifySegmentToken(token, psig);
-    expect(decoded).not.toBeNull();
-    expect(decoded.url).toBe('https://p16-common-sign.tiktokcdn-us.com/tos-useast8-v-5300-tx2/seg1.image');
-    expect(decoded.referer).toBe('https://embed.st/');
-    expect(decoded.prefixBytes).toBe(42);
+      const rewritten = rewriteHlsPlaylist(rawM3u8, manifestUrl, {
+        referer: 'https://embed.st/',
+        origin: 'https://embed.st',
+        absoluteAddonBaseUrl: 'https://nuviosports.xyz'
+      });
+
+      const outLines = rewritten.split('\n');
+      const brIndex = outLines.findIndex(l => l.startsWith('#EXT-X-BYTERANGE:'));
+      expect(brIndex).toBeGreaterThan(0);
+      const uriLine = outLines[brIndex + 1];
+      expect(uriLine).toMatch(/^https:\/\/nuviosports\.xyz\/api\/hls\/resource\/[^/]+\/media\.ts\?psig=/);
+
+      const match = uriLine.match(/\/api\/hls\/resource\/([^/]+)\/media\.ts\?psig=([^&\s]+)/);
+      expect(match).not.toBeNull();
+      const decoded = byteRangeSigner.verifySegmentToken(match[1], decodeURIComponent(match[2]));
+      expect(decoded).not.toBeNull();
+      expect(decoded.url).toBe('https://p16-common-sign.tiktokcdn-us.com/tos-useast8-v-5300-tx2/seg1.image');
+      expect(decoded.referer).toBe(`https://embed.st/`);
+      expect(decoded.prefixBytes).toBe(42);
+    } finally {
+      if (saved === undefined) delete process.env.TIKTOK_SEGMENT_MODE;
+      else process.env.TIKTOK_SEGMENT_MODE = saved;
+    }
   });
 
   test('does not duplicate #EXT-X-BYTERANGE if manifest already contains it', () => {

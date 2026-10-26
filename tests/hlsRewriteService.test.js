@@ -311,12 +311,40 @@ describe('WorkerBudget — budget resets', () => {
   });
 });
 
-describe('HlsRewriteService — zero-bandwidth byte-range 307 redirect (default)', () => {
-  test('routes cloaked .image segments to 307 redirect endpoint by default', () => {
-    withServiceEnv({}, ({ rewriteHlsUri }) => {
+describe('HlsRewriteService — cloaked segment addressing', () => {
+  test('default: hands the CDN URI to the player (no 307 hop)', () => {
+    withServiceEnv({ TIKTOK_SEGMENT_MODE: 'direct' }, ({ rewriteHlsUri }) => {
+      const out = rewriteHlsUri('seg1.image', MANIFEST);
+      expect(out).toBe('https://cdn.example/live/seg1.image');
+      expect(out).not.toContain('/api/hls/resource');
+      expect(out).not.toContain('/api/hlschunk');
+    });
+  });
+
+  test('default playlist keeps the byte range + version 4 around the CDN URI', () => {
+    const playlist = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      '#EXT-X-TARGETDURATION:6',
+      '#EXTINF:6.000,',
+      'seg1.image',
+      '#EXTINF:6.000,',
+      'seg2.image',
+      ''
+    ].join('\n');
+    withServiceEnv({ TIKTOK_SEGMENT_MODE: 'direct' }, ({ rewriteHlsPlaylist }) => {
+      const out = rewriteHlsPlaylist(playlist, MANIFEST);
+      expect(out).toContain('#EXT-X-VERSION:4');
+      expect(out).toMatch(/#EXT-X-BYTERANGE:\d+@42/);
+      expect(out).toContain('https://cdn.example/live/seg1.image');
+      expect(out).not.toContain('/api/hls/resource');
+    });
+  });
+
+  test('TIKTOK_SEGMENT_MODE=redirect keeps the signed 307 endpoint available', () => {
+    withServiceEnv({ TIKTOK_SEGMENT_MODE: 'redirect' }, ({ rewriteHlsUri }) => {
       const out = rewriteHlsUri('seg1.image', MANIFEST);
       expect(out).toMatch(/^\/api\/hls\/resource\/[^/]+\/media\.ts\?psig=/);
-      expect(out).not.toContain('/api/hlschunk');
     });
   });
 });
