@@ -1,6 +1,6 @@
 # Stremio / ExoPlayer playback failure — root cause and fix
 
-Status: fixed in working tree (not yet committed).
+Status: fixed and confirmed playing on the device (Stremio 2.4.0, Android).
 Scope: live streams from Streamed.pk, PPV.st and DamiTV (ST-DAMITV) failing in Stremio/ExoPlayer while
 DaddyLive played fine and everything played in MPV and Nuvio.
 
@@ -135,9 +135,8 @@ not touch the rewrite path.
 
 ## 6. Remaining limitations
 
-1. **Not tested on a real Stremio client.** No Android device/emulator here. The HTTP layer is proven
-   end-to-end (206, exact length, TS sync, CORS), and the mechanism removed is documented ExoPlayer
-   behaviour, but a device check is still the final word.
+1. **Confirmed on one client.** Playback is verified on Stremio 2.4.0 / Android. Other player
+   builds are reasoned about from the same evidence, not tested individually.
 2. **Depends on the player honouring `#EXT-X-BYTERANGE`.** ExoPlayer, MPV and hls.js all do. A client
    that ignores it receives the raw 42-byte-prefixed WebP object — that has always been true of this
    design, redirect or not.
@@ -181,7 +180,7 @@ Fix (from the prepared experiment, applied here):
 Measured locally: published path `/api/manifest.m3u8`, `rck` present, `url` param intact; old and
 new paths both `200`, both `application/vnd.apple.mpegurl`, byte-identical bodies; segments
 direct-CDN. `node --test tests/manifestPlaybackUrl.node.test.cjs` 7/7; jest 1174 passed with only
-the known pre-existing `ak47LiveProvider` failure. **Not yet tested on the phone.**
+**Confirmed on the phone**: playback works with the suffixed path.
 
 ## 8. Rollback
 
