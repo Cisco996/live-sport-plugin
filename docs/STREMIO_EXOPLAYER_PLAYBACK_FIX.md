@@ -42,6 +42,9 @@ was never the blocker. **The blocker is the extra hop.**
 
 ## 3. Root cause
 
+> **Superseded for the observed Android failure.** A device bug report showed the player never
+> reached HLS at all — see §7, which is the failure this document now resolves.
+
 The failure sits in the one thing the working provider does not have: a per-segment redirect.
 
 **Local / LAN deployment (addon on http) — reproduced and explained.** `config.js` falls back to
@@ -145,6 +148,41 @@ not touch the rewrite path.
 4. **Serve the addon over HTTPS.** If `ADDON_URL` is unset the addon advertises `http://<lan-ip>`, which
    Stremio Web (https) will block as mixed content even though native players accept it.
 
-## 7. Rollback
+## 7. Update — device log evidence (Stremio 2.4.0, Media3 1.10.1-stremio01)
+
+An Android bug report from a test phone changed the diagnosis. All five failed attempts carry:
+
+```
+UnrecognizedInputFormatException
+  at androidx.media3.extractor.ProgressiveMediaPeriod$ExtractingLoadable.load
+```
+
+`ProgressiveMediaPeriod` means the player never selected HLS: it built a **progressive** media
+source and handed the playlist text to the extractor chain, which correctly refused it. On Android,
+ExoPlayer picks the source type from the URI (`Util.inferContentType`), and
+`…/api/manifest?url=…` carries no recognisable extension — the last path segment is `manifest`.
+The addon's `Content-Type: application/vnd.apple.mpegurl` never gets a say at that point.
+
+So the active failure is type inference, not the byte-range transport. The change in §4 stays
+worth having — it removes a hop a strict player can fail on — but it could not have fixed this
+symptom, and did not.
+
+Fix (from the prepared experiment, applied here):
+
+- `src/services/ManifestPlaybackUrl.js` — rewrites only the *published* playback URL
+  (`https://<addon>/api/manifest` → `…/api/manifest.m3u8`), preserving the raw query (nested
+  signed CDN URL, `referer`, `origin`, `rck`) and fragment. Third-party URLs, DASH targets,
+  already-suffixed URLs and malformed input pass through untouched.
+- `src/routes/manifest.js` — `/api/manifest.m3u8` registered as an alias of the existing handler,
+  with no redirect and no second upstream fetch.
+- `src/streams.js` — applied after `withResolveKey`, so cached provider URLs and recovery keys
+  keep their original form.
+
+Measured locally: published path `/api/manifest.m3u8`, `rck` present, `url` param intact; old and
+new paths both `200`, both `application/vnd.apple.mpegurl`, byte-identical bodies; segments
+direct-CDN. `node --test tests/manifestPlaybackUrl.node.test.cjs` 7/7; jest 1174 passed with only
+the known pre-existing `ak47LiveProvider` failure. **Not yet tested on the phone.**
+
+## 8. Rollback
 
 `TIKTOK_SEGMENT_MODE=redirect` restores the previous 307 behaviour without a code change.

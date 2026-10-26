@@ -7,6 +7,7 @@ const { parseLanguagePriority, compareStreams } = require('./services/LanguagePr
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
+const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -1501,6 +1502,10 @@ async function handleStream(type, id, config) {
     s.behaviorHints = s.behaviorHints || {};
     s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
     
+    // Change only the published path, after withResolveKey has tagged provider
+    // results. Cached provider URLs and recovery-key generation retain their form.
+    s.url = manifestPlaybackUrl(s.url, BASE_URL);
+
     // Live streams must never be marked notWebReady: true; Stremio 5 /hlsv2 transcoder crashes on live media.
     if (s.url && s.url.includes('.m3u8')) {
       s.behaviorHints.notWebReady = false;

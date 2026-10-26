@@ -27,7 +27,7 @@ const { getRequestBaseUrl } = require('../config');
 const VARIANT_BITRATE_CACHE_MAX = 1000;
 const variantBitrateCache = new Map();
 
-router.get('/api/manifest', async (req, res) => {
+router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
   const targetUrl = req.query.url;
   const isVavooTarget = Boolean(
     (targetUrl && (targetUrl.includes('/sunshine/') || targetUrl.includes('vavoo.') || targetUrl.includes(':8008'))) ||
