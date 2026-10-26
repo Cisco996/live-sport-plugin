@@ -227,7 +227,7 @@ async function attemptRemint(rck, heldUrl = '') {
     const freshUrls = [];
     for (const s of minted) {
       if (s && typeof s.url === 'string') {
-        if (s.url.includes('/api/manifest?')) {
+        if (s.url.includes('/api/manifest?') || s.url.includes('/api/manifest.m3u8?')) {
           const inner = new URL('http://localhost' + s.url).searchParams.get('url');
           if (inner) freshUrls.push(inner);
         } else if (s.url.startsWith('http')) {

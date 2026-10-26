@@ -121,7 +121,7 @@ class StreamResolveCache {
     if (!url || typeof url !== 'string') return 0;
     try {
       let target = url;
-      if (target.includes('/api/manifest?')) {
+      if (target.includes('/api/manifest?') || target.includes('/api/manifest.m3u8?')) {
         const u = new URL(target, 'http://localhost');
         target = u.searchParams.get('url') || target;
       }
