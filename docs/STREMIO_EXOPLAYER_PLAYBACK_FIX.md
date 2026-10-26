@@ -31,7 +31,7 @@ Two playlists fetched through the addon, same moment, same route:
 | `#EXT-X-VERSION` | `3` | `4` (injected by `1e2cde4`) |
 | Segment addressing | `#EXTINF` + absolute CDN `..._458.ts` | `#EXT-X-BYTERANGE:<len>@42` + `<addon>/api/hls/resource/<token>/media.ts?psig=...` |
 | Requests per segment | 1, straight to the CDN | 1 with a `Range` header, answered by **our 307** back to the CDN |
-| Redirect | none | http addon → **https** CDN |
+| Redirect | none | addon endpoint → https CDN (cross-protocol only when the addon is on http) |
 
 The failing providers use the "cloaked segment" trick: the CDN stores MPEG-TS behind a fake 42-byte
 WebP/RIFF header, so the playlist declares `#EXT-X-BYTERANGE:<len>@42` and points at our signed 307
@@ -42,34 +42,39 @@ was never the blocker. **The blocker is the extra hop.**
 
 ## 3. Root cause
 
-ExoPlayer's default data source refuses the redirect:
+The failure sits in the one thing the working provider does not have: a per-segment redirect.
+
+**Local / LAN deployment (addon on http) — reproduced and explained.** `config.js` falls back to
+`http://<lan-ip>:<port>` when `ADDON_URL` is unset, while every cloaked segment lives on
+`https://…tiktokcdn.com`. That is a cross-protocol redirect, and ExoPlayer refuses it by design:
 
 > "An HttpDataSource that uses Android's HttpURLConnection. **By default this implementation will not
 > follow cross-protocol redirects.**"
 > — [`androidx.media3.datasource.DefaultHttpDataSource`](https://developer.android.com/reference/androidx/media3/datasource/DefaultHttpDataSource)
 
-The addon is normally served over plain HTTP (`config.js` falls back to `http://<lan-ip>:<port>` when
-`ADDON_URL` is unset, and `.env` in this repo does not set it), while every cloaked segment lives on
-`https://…tiktokcdn.com`. Every segment therefore came back to ExoPlayer as a bare `307` it will not
-follow, and playback died on the first segment.
+Every segment reached ExoPlayer as a bare `307`, and playback died on the first one.
 
-MPV and Nuvio are unaffected because both follow cross-protocol redirects transparently. DaddyLive
-was unaffected because its segments are absolute CDN URLs with no redirect at all.
+**Hosted deployment (`https://nuviosports.xyz`, addon on https) — the hop still has to survive.**
+There the `Location` is https→https, which a player does follow, so the cross-protocol path does not
+apply. What remains is that the redirect only works if the player carries its `Range` header through
+it. Measured on the CDN: a request **with** the declared range returns `206` plus the TS payload; the
+same request **without** it returns the full 2 866 666-byte object starting `RIFF` — the fake WebP
+wrapper. A player that drops `Range` at the redirect therefore gets a WebP file where it expects
+MPEG-TS. Confirming which of the two a given Stremio build does needs the device; the fix below
+removes the question rather than answering it.
 
-Two things follow from this, and both matter for the fix:
+Either way the conclusion is the same: **the redirect was the only fragile element in the chain, and
+it never bought anything** — in the 307 flow it is the *player* that re-requests the CDN with its own
+headers, so all our endpoint added was a hop. Verified on the live segment, the CDN needs none of our
+headers:
 
-1. **The `Range` header and the redirect target were never ours to serve.** In the 307 flow the
-   *player* re-requests the CDN with its own headers. So the redirect added no capability — only the
-   one hop ExoPlayer refuses.
-2. **Direct CDN access needs none of our headers.** Verified against the live segment:
-
-   | Probe | Result |
-   |---|---|
-   | `Range: bytes=42-…`, no `Referer`, generic UA | `206`, exact `Content-Range`, payload starts `0x47` (TS sync) |
-   | same with ExoPlayer's `stagefright/1.2` UA | `206`, identical bytes |
-   | same with `Origin: https://web.stremio.com` | `206` + `Access-Control-Allow-Origin: *` |
-   | `OPTIONS` preflight | `200`, `Access-Control-Allow-Origin: *` |
-   | no `Range` at all (player ignores BYTERANGE) | `200`, 2 866 666 bytes, starts `RIFF` — i.e. WebP, as expected |
+| Probe | Result |
+|---|---|
+| `Range: bytes=42-…`, no `Referer`, generic UA | `206`, exact `Content-Range`, payload starts `0x47` (TS sync) |
+| same with ExoPlayer's `stagefright/1.2` UA | `206`, identical bytes |
+| same with `Origin: https://web.stremio.com` | `206` + `Access-Control-Allow-Origin: *` |
+| `OPTIONS` preflight | `200`, `Access-Control-Allow-Origin: *` |
+| no `Range` at all (player ignores BYTERANGE) | `200`, 2 866 666 bytes, starts `RIFF` — i.e. WebP, as expected |
 
 Ruled out along the way: DRM/encryption (none present), codec mismatch, CORS, `Referer`/`User-Agent`
 requirements, malformed manifests, and the `notWebReady` flags.
